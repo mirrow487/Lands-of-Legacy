@@ -2,7 +2,7 @@
 
 Tarayıcıda çalışan bir büyük strateji + gerçek zamanlı taktik savaş oyunu.
 
-- **Strateji haritası:** Her oyunda yeniden üretilen bir dünya haritası, bölgeler, uluslar, ekonomi, diplomasi ve yapay zekâ rakipler.
+- **Büyük strateji:** Her oyunda yeniden üretilen dünya, 8 ulus (kendi bayrakları ve liderleriyle), aylık takvim (1936'dan başlar), hazine / insan gücü / istikrar / araştırma, binalar (fabrika, tahkimat, kışla), 15 teknoloji, ittifaklar ve ilişkiler, seçimli rastgele olaylar, Dünya Gazetesi haber akışı ve 5 harita modu.
 - **İzometrik savaş alanı:** Bir muharebe başladığında savaş alanına girip piyade, tank ve topçu birliklerini gerçek zamanlı olarak yönetirsin (sürükleyerek seçme, sağ tıkla hareket/saldırı, kontrol grupları, mini harita).
 
 ## Çalıştırma
@@ -44,6 +44,10 @@ Sonra tarayıcıda `http://localhost:8000` adresine git.
 | `S` / `Q` / `P` | Dur / tümünü seç / duraklat |
 | Ctrl+1-9, 1-9 | Kontrol grubu kur / seç |
 | Ok tuşları, ekran kenarı, orta tuş | Kamera |
+
+## Ses
+
+Tüm sesler kodla üretilir: mesafeye göre süzülen ve yankılanan silah sesleri, topçu mermisi ıslığı, savaş alanı ambiyansı, strateji ve savaş için ayrı müzikler. Tarayıcıda Türkçe konuşma sesi varsa birlikler telsizden cevap verir. Ses seviyeleri Ayarlar menüsünden değiştirilebilir.
 
 ## Dosyalar
 
