@@ -7,7 +7,14 @@ Tarayıcıda çalışan bir büyük strateji + gerçek zamanlı taktik savaş oy
 
 ## Çalıştırma
 
-Kurulum ya da derleme gerekmez. `index.html` dosyasını tarayıcıda açman yeterli.
+**En kolay yol:** `LandsOfLegacy.html` dosyasını indirip tarayıcıda aç. Tüm oyun bu tek dosyanın içinde.
+
+`index.html` ise `css/` ve `js/` klasörleriyle birlikte çalışır; tek başına indirilirse sayfa stilsiz ve boş görünür.
+Kaynak dosyaları değiştirdikten sonra tek dosyalık sürümü yeniden üretmek için:
+
+```bash
+python3 build.py
+```
 
 İstersen yerel bir sunucuyla da açabilirsin:
 
