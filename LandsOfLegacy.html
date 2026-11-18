@@ -6504,12 +6504,27 @@ new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
       .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent') && /gemini/i.test(m.name))
       .map((m) => ({ id: m.name.replace(/^models\//, ''), name: m.displayName || m.name }));
   }
-  function bestGemini(list) {
+  // Text-chat-capable models ranked best-first: newest stable flash, then previews, then lite / pro.
+  function rankGemini(ids) {
     const ver = (id) => { const m = id.match(/gemini-(\d+(?:\.\d+)?)/); return m ? parseFloat(m[1]) : 0; };
-    const clean = list.filter((m) => /flash/.test(m.id) && !/lite|image|tts|audio|live|embed|exp|thinking|8b/.test(m.id));
-    const pool = clean.length ? clean : list;
-    pool.sort((a, b) => ver(b.id) - ver(a.id) || (/preview/.test(a.id) ? 1 : 0) - (/preview/.test(b.id) ? 1 : 0) || a.id.length - b.id.length);
-    return pool[0] ? pool[0].id : GEMINI_FALLBACK;
+    const ok = ids.filter((id) => !/image|tts|audio|live|embed|vision|robotics|computer|native/.test(id));
+    const tier = (id) => (/flash/.test(id) && !/lite/.test(id) ? 0 : /flash-lite|lite/.test(id) ? 1 : /pro/.test(id) ? 2 : 3)
+      + (/preview|exp/.test(id) ? 0.5 : 0);
+    return ok.sort((a, b) => tier(a) - tier(b) || ver(b) - ver(a) || a.length - b.length);
+  }
+  function bestGemini(list) {
+    const r = rankGemini(list.map((m) => m.id));
+    return r[0] || GEMINI_FALLBACK;
+  }
+  // Models to try in order when the chosen one is overloaded or unavailable
+  function geminiCandidates(model) {
+    let known = [];
+    try { known = JSON.parse(ls.get('lol_models_gemini') || '[]'); } catch (e) { known = []; }
+    const ranked = rankGemini(known.slice());
+    const out = [model || geminiModel()];
+    for (const id of ranked) if (!out.includes(id) && out.length < 4) out.push(id);
+    if (!out.includes(GEMINI_FALLBACK) && out.length < 5) out.push(GEMINI_FALLBACK);
+    return out;
   }
 
   // AI settings screen: everyone connects their own key
@@ -6555,6 +6570,7 @@ new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
           msg.textContent = 'Modeller yükleniyor...';
           try {
             const list = await listGeminiModels(k);
+            ls.set('lol_models_gemini', JSON.stringify(list.map((m) => m.id)));
             const best = bestGemini(list);
             const sel = wrap.querySelector('#ai-model');
             const cur = sel.value;
@@ -6568,7 +6584,8 @@ new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
           msg.textContent = 'Deneniyor...';
           try {
             const t = await callModel(r.prov, r.prov === 'gemini' ? r.gk : r.ck, r.model, 'Kısa yanıt ver.', [{ role: 'user', content: 'Sadece "Emrinizdeyim, efendim." de.' }], 200);
-            msg.innerHTML = '<span style="color:var(--good)">✔ Bağlantı çalışıyor:</span> ' + U.esc(t.slice(0, 80));
+            const alt = r.prov === 'gemini' && A.lastModel && A.lastModel !== r.model ? ` <span style="color:#e8c050">(${U.esc(r.model)} yoğundu, yedek model <b>${U.esc(A.lastModel)}</b> kullanıldı)</span>` : '';
+            msg.innerHTML = '<span style="color:var(--good)">✔ Bağlantı çalışıyor:</span> ' + U.esc(t.slice(0, 80)) + alt;
           } catch (e) { msg.innerHTML = '<span style="color:var(--bad)">✖ ' + U.esc(errText(e)) + '</span>'; }
         };
       },
@@ -6588,6 +6605,7 @@ new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
     if (e.status === 401 || e.status === 403) return 'API anahtarı geçersiz ya da yetkisiz.';
     if (e.status === 429) return 'Kota/oran sınırı aşıldı, biraz bekle.';
     if (e.status === 404) return 'Model bulunamadı — "Modelleri Yükle" ile başka model seç.';
+    if (e.status === 503 || e.status === 500 || e.status === 502 || e.status === 504) return 'Gemini sunucuları şu an çok yoğun (Google tarafında geçici bir durum). Yedek modeller de denendi; biraz sonra tekrar dene ya da listeden başka bir model seç.';
     return e.message || String(e);
   }
 
@@ -6606,20 +6624,41 @@ new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
   async function callModel(prov, key, model, system, messages, maxTokens) {
     if (!key) throw { message: 'Anahtar girilmedi.' };
     if (prov === 'gemini') {
-      const body = {
+      const body = JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: messages.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
         generationConfig: { maxOutputTokens: Math.max(1024, maxTokens || 4096), temperature: 0.8 },
-      };
-      const r = await fetch(`${GEMINI_BASE}/models/${encodeURIComponent(model || geminiModel())}:generateContent?key=${encodeURIComponent(key)}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw { status: r.status, message: (j.error && j.error.message) || r.statusText };
-      if (j.promptFeedback && j.promptFeedback.blockReason) return 'Bu konuda size yardımcı olamam, efendim.';
-      const c = j.candidates && j.candidates[0];
-      const text = c && c.content && c.content.parts ? c.content.parts.map((p) => p.text || '').join('').trim() : '';
-      return text || 'Telsizde parazit var, efendim. Soruyu tekrar eder misiniz?';
+      if (!ls.get('lol_models_gemini')) {
+        try { const list = await listGeminiModels(key); ls.set('lol_models_gemini', JSON.stringify(list.map((x) => x.id))); } catch (e) { /* use what we have */ }
+      }
+      const transient = (st) => st === 429 || st === 500 || st === 502 || st === 503 || st === 504;
+      let lastErr = null;
+      for (const m of geminiCandidates(model)) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          let r, j;
+          try {
+            r = await fetch(`${GEMINI_BASE}/models/${encodeURIComponent(m)}:generateContent?key=${encodeURIComponent(key)}`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
+            });
+            j = await r.json().catch(() => ({}));
+          } catch (e) { lastErr = { message: 'Ağ hatası: ' + (e.message || e) }; break; }
+          if (r.ok) {
+            A.lastModel = m;
+            if (j.promptFeedback && j.promptFeedback.blockReason) return 'Bu konuda size yardımcı olamam, efendim.';
+            const c = j.candidates && j.candidates[0];
+            const text = c && c.content && c.content.parts ? c.content.parts.map((p) => p.text || '').join('').trim() : '';
+            return text || 'Telsizde parazit var, efendim. Soruyu tekrar eder misiniz?';
+          }
+          lastErr = { status: r.status, message: (j.error && j.error.message) || r.statusText };
+          if (r.status === 401 || r.status === 403 || r.status === 400) throw lastErr; // key / request problem: no point retrying
+          if (r.status === 404) break; // model gone: try the next one
+          if (!transient(r.status)) throw lastErr;
+          if (attempt === 0 && r.status !== 429) await U.sleep(1500); // brief backoff, then retry once
+          else break; // quota on this model or still overloaded: move to the next model
+        }
+      }
+      throw lastErr || { message: 'Bilinmeyen hata' };
     }
     const anthropic = await claudeClient(key);
     const resp = await anthropic.beta.messages.create({
