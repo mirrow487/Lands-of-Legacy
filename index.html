@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<title>Lands of Legacy</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<!-- ANA MENÜ -->
+<div id="menu" class="screen">
+  <div class="menu-box">
+    <h1>LANDS <span>of</span> LEGACY</h1>
+    <p class="tagline">Haritayı fethet. Savaş alanında ordularını bizzat yönet.</p>
+    <button id="m-new" class="big">Yeni Oyun</button>
+    <button id="m-load" class="big">Devam Et</button>
+    <button id="m-help" class="big">Nasıl Oynanır</button>
+    <p class="ver">v1.0</p>
+  </div>
+</div>
+
+<!-- STRATEJİ ARAYÜZÜ -->
+<div id="strategy-ui" class="hidden">
+  <div id="topbar">
+    <div class="nation-badge"><span id="tb-flag" class="flag"></span><span id="tb-name">-</span></div>
+    <div class="stat" title="Hazine">Altın <b id="tb-gold">0</b> <small id="tb-income"></small></div>
+    <div class="stat">Tur <b id="tb-turn">1</b></div>
+    <div class="stat" title="Bölge sayısı">Bölge <b id="tb-provs">0</b></div>
+    <div class="stat" title="Ordu gücü">Güç <b id="tb-power">0</b></div>
+    <div class="stat wars" id="tb-wars"></div>
+    <div class="spacer"></div>
+    <button id="btn-diplo">Diplomasi</button>
+    <button id="btn-save">Kaydet</button>
+    <button id="btn-sound">Ses: Açık</button>
+    <button id="btn-menu">Menü</button>
+  </div>
+  <div id="pick-banner" class="hidden">
+    <div>Haritadan yöneteceğin ulusu seç</div>
+    <button id="btn-newmap">Yeni Harita</button>
+  </div>
+  <div id="prov-panel" class="panel hidden"></div>
+  <div id="log" class="panel"></div>
+  <button id="btn-endturn">Turu Bitir ▶</button>
+  <div id="busy" class="hidden">Diğer uluslar hamle yapıyor...</div>
+</div>
+
+<!-- SAVAŞ ARAYÜZÜ -->
+<div id="battle-ui" class="hidden">
+  <div id="sidebar">
+    <div class="sb-head">
+      <div id="sb-title">SAVAŞ</div>
+      <div id="sb-sub"></div>
+    </div>
+    <div class="mini-wrap"><canvas id="minimap" width="212" height="112"></canvas></div>
+    <div class="sb-forces">
+      <div class="f-row"><span class="flag" id="f-us"></span><span id="f-us-name"></span><b id="f-us-n"></b></div>
+      <div class="f-bar"><div id="f-bar-us"></div><div id="f-bar-them"></div></div>
+      <div class="f-row"><span class="flag" id="f-them"></span><span id="f-them-name"></span><b id="f-them-n"></b></div>
+    </div>
+    <div id="sb-sel" class="sb-sel"></div>
+    <div class="sb-btns">
+      <button data-b="amove" title="A">Saldırı Hareketi <kbd>A</kbd></button>
+      <button data-b="stop" title="S">Dur <kbd>S</kbd></button>
+      <button data-b="selall" title="Q">Tümünü Seç <kbd>Q</kbd></button>
+      <button data-b="speed" id="b-speed">Hız 1x</button>
+      <button data-b="pause" id="b-pause">Duraklat <kbd>P</kbd></button>
+      <button data-b="retreat" class="danger">Geri Çekil</button>
+    </div>
+    <div class="sb-help">
+      <b>Sol tık</b> seç &middot; <b>sürükle</b> kutu seçimi<br>
+      <b>Sağ tık</b> hareket / saldırı<br>
+      <b>Çift tık</b> aynı türü seç<br>
+      <b>Ctrl+1-9</b> grup kur &middot; <b>1-9</b> grubu seç<br>
+      <b>Ok tuşları</b> / kenar / orta tuş: kamera
+    </div>
+  </div>
+  <div id="battle-banner"></div>
+</div>
+
+<div id="tooltip" class="hidden"></div>
+<div id="modal-root"></div>
+
+<script src="js/util.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/mapgen.js"></script>
+<script src="js/battle.js"></script>
+<script src="js/strategy.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
