@@ -104,17 +104,21 @@
       <p><b>Sol tık / sürükle</b>: birlik seç &middot; <b>Sağ tık</b>: hareket et / saldır &middot; <b>Ctrl+Sağ tık</b> veya <b>A</b>: saldırı hareketi (yolda düşmanla çatışır)</p>
       <p><b>S</b>: dur &middot; <b>Q</b>: tümünü seç &middot; <b>Ctrl+1-9</b>: grup kur &middot; <b>P</b>: duraklat &middot; Ok tuşları / ekran kenarı / orta tuş: kamera</p>
       <h3>Birlikler</h3>
-      <p><b>Piyade</b> — ucuz, piyadeye karşı etkili, zırha karşı zayıf.<br>
-      <b>Tank</b> — dayanıklı, hareket halindeyken taretiyle ateş eder, zırhlılara karşı güçlü.<br>
-      <b>Topçu</b> — çok uzun menzil ve alan hasarı, ama yakın mesafede ateş edemez ve kırılgandır.</p>
+      <p>${LOL.util.TYPES.map((t) => `<b>${LOL.config.unitName[t]}</b> — ${LOL.config.unitDesc[t]}`).join('<br>')}</p>
+      <p>Ağır Tank ve Roket Topçusu için önce ilgili teknolojiyi araştırmalısın. Düşman öldüren birlikler tecrübe kazanır (★).</p>
+      <h3>Savaş Alanı</h3>
+      <p>Sis perdesi: yalnızca birliklerinin gördüğü yerleri görürsün. Hava durumu (yağmur, sis, kar, kum fırtınası) ve mevsim savaş alanını değiştirir. Topçu ve roketler ağaçları devirir, evleri yıkar.</p>
+      <h3>Danışman</h3>
+      <p>Sol alttaki danışman her ay durumu değerlendirir ve öneriler sunar. Claude API anahtarı eklersen onunla serbestçe sohbet edebilirsin.</p>
       </div>`, [{ label: 'Anladım', value: 1, cls: 'primary' }]);
   };
 
   // ---------------- boot ----------------
   LOL.strategy.init();
   LOL.strategy.bindUI();
+  LOL.advisor.bind();
   resize();
-  LOL.strategy.newMap((Math.random() * 1e9) >>> 0);
+  LOL.strategy.newMap((Math.random() * 1e9) >>> 0, 'world');
   app.toMenu();
 
   let last = performance.now();

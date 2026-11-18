@@ -82,20 +82,34 @@ window.LOL = window.LOL || {};
   U.esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   U.sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  U.zeroUnits = () => ({ inf: 0, tank: 0, art: 0 });
-  U.copyUnits = (u) => ({ inf: u.inf, tank: u.tank, art: u.art });
-  U.sumUnits = (u) => u.inf + u.tank + u.art;
-  U.TYPES = ['inf', 'tank', 'art'];
+  U.TYPES = ['inf', 'mg', 'at', 'recon', 'tank', 'heavy', 'art', 'rocket'];
+  U.zeroUnits = () => { const o = {}; U.TYPES.forEach((t) => { o[t] = 0; }); return o; };
+  U.copyUnits = (u) => { const o = {}; U.TYPES.forEach((t) => { o[t] = (u && u[t]) || 0; }); return o; };
+  U.sumUnits = (u) => U.TYPES.reduce((s, t) => s + ((u && u[t]) || 0), 0);
 
   LOL.config = {
-    unitName: { inf: 'Piyade', tank: 'Tank', art: 'Topçu' },
-    cost: { inf: 8, tank: 25, art: 20 },
-    upkeep: { inf: 0.2, tank: 0.6, art: 0.5 },
-    power: { inf: 1, tank: 3.2, art: 2.4 },
+    unitName: { inf: 'Piyade', mg: 'Makineli Tüfek', at: 'Tanksavar', recon: 'Zırhlı Keşif', tank: 'Tank', heavy: 'Ağır Tank', art: 'Topçu', rocket: 'Roket Topçusu' },
+    unitShort: { inf: 'Piyade', mg: 'MG', at: 'Tanksavar', recon: 'Keşif', tank: 'Tank', heavy: 'Ağır Tank', art: 'Topçu', rocket: 'Roket' },
+    unitDesc: {
+      inf: 'Ucuz ve çok yönlü. Piyadeye karşı etkili.',
+      mg: 'Yavaş ama yoğun ateş. Piyade dalgalarını biçer.',
+      at: 'Omuzdan atılan roket. Zırhlılara karşı ölümcül.',
+      recon: 'Çok hızlı zırhlı araç, geniş görüş. Hafif silahlı.',
+      tank: 'Dengeli zırh ve top. Hareket halindeyken ateş eder.',
+      heavy: 'Yavaş ama devasa zırh ve top. Cephe kırıcı.',
+      art: 'Çok uzun menzil, alan hasarı. Yakın mesafede savunmasız.',
+      rocket: 'Arka arkaya roket yağdırır. Geniş alanı yakar.',
+    },
+    cost: { inf: 8, mg: 12, at: 14, recon: 16, tank: 25, heavy: 45, art: 20, rocket: 35 },
+    mp: { inf: 1000, mg: 800, at: 800, recon: 400, tank: 600, heavy: 800, art: 800, rocket: 800 },
+    upkeep: { inf: 0.2, mg: 0.3, at: 0.35, recon: 0.4, tank: 0.6, heavy: 1.1, art: 0.5, rocket: 0.85 },
+    power: { inf: 1, mg: 1.4, at: 1.6, recon: 1.8, tank: 3.2, heavy: 5.5, art: 2.4, rocket: 3.6 },
+    req: { heavy: 'tank2', rocket: 'art2' },
+    techClass: { inf: 'inf', mg: 'inf', at: 'inf', recon: 'tank', tank: 'tank', heavy: 'tank', art: 'art', rocket: 'art' },
     startGold: 60,
     capitalBonus: 5,
   };
-  U.power = (u) => u.inf * LOL.config.power.inf + u.tank * LOL.config.power.tank + u.art * LOL.config.power.art;
+  U.power = (u) => U.TYPES.reduce((s, t) => s + ((u && u[t]) || 0) * LOL.config.power[t], 0);
   U.unitsText = (u) => {
     const n = LOL.config.unitName;
     const parts = [];

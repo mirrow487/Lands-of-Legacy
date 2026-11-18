@@ -5,11 +5,11 @@
   // ======================================================================
   const U = LOL.util, C = LOL.config, UI = LOL.ui;
   const S = (LOL.strategy = {});
-  const SAVE_KEY = 'lol_save_v2';
+  const SAVE_KEY = 'lol_save_v3';
   const MONTHS = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
   const dateStr = (turn) => MONTHS[(turn - 1) % 12] + ' ' + (1936 + Math.floor((turn - 1) / 12));
 
-  const MP_COST = { inf: 1000, tank: 600, art: 800 };
+  const MP_COST = C.mp;
   const BUILD = {
     fac: { name: 'Fabrika', ico: 'factory', max: 3, cost: (l) => 45 + l * 35, desc: '+2 altın ve +1 araştırma / ay' },
     fort: { name: 'Tahkimat', ico: 'fort', max: 3, cost: (l) => 35 + l * 30, desc: 'Savunmada +%15 güç, savaş alanında sığınak ve siper' },
@@ -79,6 +79,7 @@
   }
   function typeMult(nid, t) {
     const e = eff(nid);
+    t = C.techClass[t] || t;
     return 1 + 0.6 * (e[t + 'Dmg'] || 0) + 0.6 * (e[t + 'Hp'] || 0) + 0.3 * (e[t + 'Range'] || 0) + 0.2 * (e[t + 'Speed'] || 0) + 0.3 * (e[t + 'Acc'] || 0) + 0.3 * (e[t + 'Rof'] || 0);
   }
   const powerOf = (u, nid) => U.TYPES.reduce((s, t) => s + u[t] * C.power[t] * (nid == null ? 1 : typeMult(nid, t)), 0);
@@ -111,15 +112,18 @@
   // ---------------------------------------------------------------- setup
   S.init = function () { canvas = LOL.app.canvas; ctx = LOL.app.ctx; };
 
-  S.newMap = function (seed) {
-    map = LOL.mapgen.generate(seed, 8);
+  S.newMap = function (seed, kind) {
+    map = kind === 'world' ? LOL.mapgen.generateWorld(seed) : LOL.mapgen.generate(seed, 8);
+    S.mapKind = map.kind;
     const rng = U.rng(seed + 5);
-    G = { seed, turn: 1, playerId: -1, nations: map.nations, provinces: map.provinces, wars: new Set(), allies: new Set(), truce: {}, rel: {}, news: [], eventsSeen: {} };
+    G = { seed, kind: map.kind, turn: 1, playerId: -1, nations: map.nations, provinces: map.provinces, wars: new Set(), allies: new Set(), truce: {}, rel: {}, news: [], eventsSeen: {} };
     G.nations.forEach((n) => {
       const gov = rng.pick(GOVS);
+      n.advisor = rng.pick(['Orgeneral', 'Mareşal', 'Amiral', 'Kurmay Albay']) + ' ' + rng.pick(FIRST) + ' ' + rng.pick(LAST);
       Object.assign(n, { manpower: 9000, stability: rng.int(55, 75), techs: [], research: { cur: null, prog: 0 }, gov: gov.g, leader: gov.t + ' ' + rng.pick(FIRST) + ' ' + rng.pick(LAST), flagSeed: rng.int(0, 999) });
     });
-    for (let a = 0; a < G.nations.length; a++) for (let b = a + 1; b < G.nations.length; b++) G.rel[key(a, b)] = rng.int(-25, 30);
+    if (map.kind !== 'world') for (let a = 0; a < G.nations.length; a++) for (let b = a + 1; b < G.nations.length; b++) G.rel[key(a, b)] = rng.int(-25, 30);
+    else map.provinces.forEach((p) => p.neighbors.forEach((q) => { const a = p.owner, b = map.provinces[q].owner; if (a !== b && G.rel[key(a, b)] == null) G.rel[key(a, b)] = rng.int(-25, 30); }));
     nationRGB = G.nations.map((n) => U.hexToRgb(n.color));
     mapCanvas = document.createElement('canvas'); mapCanvas.width = map.W; mapCanvas.height = map.H;
     mapCtx = mapCanvas.getContext('2d');
@@ -169,7 +173,7 @@
       return [U.lerp(60, 250, v), U.lerp(70, 210, v), U.lerp(90, 60, v)];
     }
     if (mapMode === 'terrain') {
-      return { 'Ova': [150, 175, 100], 'Ormanlık': [60, 115, 55], 'Tepelik': [150, 125, 90], 'Kıyı': [205, 190, 140] }[p.terrain];
+      return nationRGB[own];
     }
     if (mapMode === 'military') {
       const v = U.clamp(powerOf(p.units) / 40, 0, 1);
@@ -181,48 +185,54 @@
 
   function renderMap() {
     const d = img.data, W = map.W, H = map.H;
-    const pid = map.pid, depth = map.seaDepth, shade = map.shade, nb = map.nbPid, coast = map.coast;
+    const pid = map.pid, depth = map.seaDepth, sn = map.seaNoise, nb = map.nbPid, coast = map.coast, biome = map.biome, elev = map.elev;
+    const BR = LOL.mapgen.BIOME_RGB;
     const owners = G.provinces.map((p) => p.owner);
     const cols = G.provinces.map(provColor);
     const selP = sel >= 0 ? P(sel) : null;
     const targets = new Set();
     if (selP && selP.owner === G.playerId && phase === 'play') selP.neighbors.forEach((q) => targets.add(q));
     const pickNation = phase === 'pick' && sel >= 0 ? P(sel).owner : -1;
-    const politicalBorders = mapMode === 'political' || mapMode === 'diplo';
+    const politicalBorders = mapMode !== 'terrain' && mapMode !== 'economy';
+    const tint = mapMode === 'terrain' ? 0 : mapMode === 'political' || mapMode === 'diplo' ? 0.58 : 0.72;
     for (let i = 0, o = 0; i < W * H; i++, o += 4) {
       const p = pid[i];
       let r, g, b;
       if (p < 0) {
-        const t = Math.min(1, depth[i] / 55);
-        const s = (shade[i] - 128) / 255 * 14;
-        r = 52 + (12 - 52) * t + s; g = 96 + (30 - 96) * t + s; b = 128 + (58 - 128) * t + s;
+        // Azgaar-like ocean: light shelf, contour lines, deep water
         const dd = depth[i];
-        if (dd === 4 || dd === 5 || dd === 10) { r += 14; g += 18; b += 18; }
+        const t = Math.min(1, dd / 60);
+        const nn = (sn[i] - 128) / 255 * 10;
+        r = 98 + (44 - 98) * t + nn; g = 146 + (86 - 146) * t + nn; b = 196 + (150 - 196) * t + nn;
+        if (dd === 3 || dd === 8 || dd === 16 || dd === 28) { r += 22; g += 24; b += 22; }
         const x = i % W, y = (i / W) | 0;
-        if (x % 125 === 0 || y % 125 === 0) { r += 7; g += 9; b += 11; }
+        if (x % 100 === 0 || y % 100 === 0) { r += 6; g += 7; b += 8; }
       } else {
         const own = owners[p];
+        const bc = BR[biome[i]];
+        const e = elev[i];
+        // hillshade from elevation gradient
+        const ex = i % W < W - 1 ? elev[i + 1] : e, ey = i < (H - 1) * W ? elev[i + W] : e;
+        const shade = U.clamp(1 + (e - ex) * 6 + (e - ey) * 6 - e * 0.15, 0.7, 1.25);
         const c = cols[p];
-        const s = shade[i] / 128;
-        r = c[0] * s; g = c[1] * s; b = c[2] * s;
-        const avg = (r + g + b) / 3;
-        r = r * 0.8 + avg * 0.2; g = g * 0.8 + avg * 0.2; b = b * 0.8 + avg * 0.2;
-        if (pickNation >= 0) { if (own === pickNation) { r += 35; g += 35; b += 35; } else { r *= 0.7; g *= 0.7; b *= 0.7; } }
+        r = (bc[0] * (1 - tint) + c[0] * tint) * shade;
+        g = (bc[1] * (1 - tint) + c[1] * tint) * shade;
+        b = (bc[2] * (1 - tint) + c[2] * tint) * shade;
+        if (pickNation >= 0) { if (own === pickNation) { r += 40; g += 40; b += 40; } else { r *= 0.72; g *= 0.72; b *= 0.72; } }
         if (p === sel) { r += 40; g += 40; b += 40; }
         else if (targets.has(p)) {
           const x = i % W, y = (i / W) | 0;
-          if (((x + y) >> 2) & 1) { const en = owners[p] !== G.playerId; r += en ? 45 : 20; g += en ? 5 : 30; b += en ? 0 : 20; }
+          if (((x + y) >> 2) & 1) { const en = owners[p] !== G.playerId; r += en ? 50 : 20; g += en ? 0 : 30; b += en ? -10 : 15; }
         }
-        if (coast[i]) { r *= 0.35; g *= 0.35; b *= 0.35; }
+        if (coast[i]) { r *= 0.42; g *= 0.42; b *= 0.45; }
         else if (nb[i] >= 0) {
-          if (politicalBorders && owners[nb[i]] !== own) { r *= 0.18; g *= 0.18; b *= 0.18; }
-          else { r *= 0.72; g *= 0.72; b *= 0.72; }
+          if (politicalBorders && owners[nb[i]] !== own) { r *= 0.25; g *= 0.25; b *= 0.25; }
+          else { r *= 0.8; g *= 0.8; b *= 0.8; }
         }
       }
       d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
     }
     mapCtx.putImageData(img, 0, 0);
-    // selection outline overlay
     const sc = selCanvas.getContext('2d');
     sc.clearRect(0, 0, W, H);
     if (selP) {
@@ -289,6 +299,12 @@
     ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 30 / Math.max(1, cam.s);
     ctx.drawImage(mapCanvas, 0, 0);
     ctx.shadowBlur = 0;
+    if (map.overlay) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.globalAlpha = mapMode === 'terrain' ? 1 : 0.75;
+      ctx.drawImage(map.overlay, 0, 0, map.W, map.H);
+      ctx.globalAlpha = 1;
+    }
     if (sel >= 0) {
       ctx.globalAlpha = 0.55 + 0.45 * Math.sin(waveT * 4);
       ctx.drawImage(selCanvas, 0, 0);
@@ -301,10 +317,12 @@
     for (const [a, b] of map.links) { ctx.beginPath(); ctx.moveTo(P(a).cx, P(a).cy); ctx.lineTo(P(b).cx, P(b).cy); ctx.stroke(); }
     ctx.setLineDash([]);
     // nation names
-    const la = U.clamp(1.9 - cam.s * 0.65, 0, 0.85);
-    if (la > 0.02 && (mapMode === 'political' || mapMode === 'diplo')) {
+    if (mapMode === 'political' || mapMode === 'diplo') {
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       for (const l of labels) {
+        const ss = l.fs * cam.s;
+        const la = ss < 10 ? 0 : ss > 70 ? Math.max(0, 1 - (ss - 70) / 40) * 0.85 : 0.85;
+        if (la <= 0.02) continue;
         ctx.save();
         ctx.translate(l.x, l.y); ctx.rotate(l.ang);
         ctx.font = `700 ${l.fs}px Cinzel, Georgia, serif`;
@@ -322,27 +340,6 @@
     ctx.restore();
     ctx.imageSmoothingEnabled = true;
 
-    // terrain glyphs when zoomed
-    if (cam.s > 1.7) {
-      for (const p of G.provinces) {
-        if (p.terrain !== 'Ormanlık' && p.terrain !== 'Tepelik') continue;
-        const [x, y] = toScreen(p.cx, p.cy);
-        if (x < -40 || y < -40 || x > W + 40 || y > H + 40) continue;
-        for (let k = 0; k < 3; k++) {
-          const gx = x + (k - 1) * 14 - 2, gy = y + 26 + (k === 1 ? -4 : 0);
-          if (p.terrain === 'Ormanlık') {
-            ctx.fillStyle = 'rgba(20,50,20,0.55)';
-            ctx.beginPath(); ctx.moveTo(gx, gy - 9); ctx.lineTo(gx + 5, gy); ctx.lineTo(gx - 5, gy); ctx.closePath(); ctx.fill();
-          } else {
-            ctx.fillStyle = 'rgba(60,40,20,0.5)';
-            ctx.beginPath(); ctx.moveTo(gx - 7, gy); ctx.lineTo(gx, gy - 9); ctx.lineTo(gx + 7, gy); ctx.closePath(); ctx.fill();
-            ctx.fillStyle = 'rgba(255,255,255,0.4)';
-            ctx.beginPath(); ctx.moveTo(gx - 2, gy - 6); ctx.lineTo(gx, gy - 9); ctx.lineTo(gx + 2, gy - 6); ctx.closePath(); ctx.fill();
-          }
-        }
-      }
-    }
-
     // move arrow preview
     if (sel >= 0 && phase === 'play' && P(sel).owner === G.playerId && hover >= 0 && P(sel).neighbors.includes(hover) && U.sumUnits(clampSend(P(sel))) > 0) {
       const [ax, ay] = toScreen(P(sel).cx, P(sel).cy), [bx, by] = toScreen(P(hover).cx, P(hover).cy);
@@ -351,8 +348,9 @@
     }
 
     // province names
-    if (cam.s > 1.35) {
-      const a = U.clamp((cam.s - 1.35) * 2, 0, 1);
+    const nameZ = map.kind === 'world' ? 2.4 : 1.35;
+    if (cam.s > nameZ) {
+      const a = U.clamp((cam.s - nameZ) * 2, 0, 1);
       ctx.font = `600 ${Math.min(13, 7 + cam.s * 2) | 0}px Inter, sans-serif`;
       ctx.textAlign = 'center';
       for (const p of G.provinces) {
@@ -369,9 +367,9 @@
       const [x, y] = toScreen(p.cx, p.cy);
       if (x < -50 || y < -50 || x > W + 50 || y > H + 50) continue;
       const tot = U.sumUnits(p.units);
-      if (p.isCapital) capitalIcon(x, y - (tot ? 17 : 0));
+      if (p.isCapital && (map.kind !== 'world' || cam.s > 1.2 || p.owner === G.playerId)) capitalIcon(x, y - (tot && counterVisible(p) ? 17 : 0));
       else if (cam.s > 1.1 && p.buildings.fort > 0) { ctx.fillStyle = 'rgba(30,30,30,.8)'; ctx.fillRect(x - 3, y - (tot ? 19 : 4), 6, 6); }
-      if (tot > 0 && !anims.some((a) => a.to === p.id && a.t < a.dur)) counter(p, x, y, tot);
+      if (tot > 0 && !anims.some((a) => a.to === p.id && a.t < a.dur) && counterVisible(p)) counter(p, x, y, tot);
     }
     // move anims
     anims = anims.filter((a) => a.t < a.dur + 0.05);
@@ -399,6 +397,14 @@
     } else UI.tooltip(null);
   };
 
+  function counterVisible(p) {
+    if (map.kind !== 'world' || cam.s >= 3.2) return true;
+    if (G.playerId < 0) return false;
+    const me = G.playerId;
+    if (p.owner === me || atWar(me, p.owner)) return true;
+    if (sel >= 0 && P(sel).neighbors.includes(p.id)) return true;
+    return p.neighbors.some((q) => P(q).owner === me);
+  }
   function arrow(ax, ay, bx, by, col) {
     const dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy);
     if (L < 5) return;
@@ -430,6 +436,7 @@
   }
   function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
   function unitGlyph(type, x, y) {
+    type = C.techClass[type];
     ctx.fillStyle = '#fff'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4;
     if (type === 'inf') { ctx.beginPath(); ctx.arc(x, y - 3.5, 2.2, 0, 7); ctx.fill(); ctx.beginPath(); ctx.moveTo(x - 4, y + 5); ctx.quadraticCurveTo(x, y - 4, x + 4, y + 5); ctx.fill(); }
     else if (type === 'tank') { ctx.fillRect(x - 5, y, 10, 3.5); ctx.fillRect(x - 2.5, y - 3, 5, 3.5); ctx.fillRect(x + 1, y - 2, 5, 1.5); }
@@ -438,7 +445,8 @@
   function counter(p, x, y, tot) {
     const own = p.owner === G.playerId;
     const dom = U.TYPES.reduce((a, t) => (p.units[t] * C.power[t] > p.units[a] * C.power[a] ? t : a), 'inf');
-    const label = cam.s > 1.9 ? `${p.units.inf}·${p.units.tank}·${p.units.art}` : String(tot);
+    const cls = { inf: 0, tank: 0, art: 0 }; U.TYPES.forEach((t) => { cls[C.techClass[t]] += p.units[t]; });
+    const label = cam.s > (map.kind === 'world' ? 4.5 : 1.9) ? `${cls.inf}·${cls.tank}·${cls.art}` : String(tot);
     ctx.font = '700 11px Inter, sans-serif';
     const w = Math.max(30, ctx.measureText(label).width + 26), h = 17;
     const bx = x - w / 2, by = y - h / 2;
@@ -471,7 +479,7 @@
         if (Math.abs(mx - drag.x) + Math.abs(my - drag.y) > 5) drag.moved = true;
         if (drag.moved) { cam.x = drag.cx + (mx - drag.x); cam.y = drag.cy + (my - drag.y); }
       }
-      hover = phase === 'menu' ? -1 : pidAt(mx, my);
+      hover = phase === 'menu' || (e.target !== canvas && !drag) ? -1 : pidAt(mx, my);
     } else if (type === 'down') {
       if (phase === 'menu') return;
       if (e.button === 0 || e.button === 1) drag = { x: mx, y: my, cx: cam.x, cy: cam.y, moved: false };
@@ -482,7 +490,7 @@
     } else if (type === 'wheel') {
       if (phase === 'menu') return;
       const f = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-      const ns = U.clamp(cam.s * f, 0.6, 6);
+      const ns = U.clamp(cam.s * f, 0.6, map.kind === 'world' ? 9 : 6);
       const [wx, wy] = toWorld(mx, my);
       cam.s = ns; cam.x = mx - wx * ns; cam.y = my - wy * ns;
     } else if (type === 'leave') {
@@ -556,7 +564,7 @@
     G.allies.delete(key(a, b));
     addRel(a, b, -60);
     const involved = isPlayer(a) || isPlayer(b);
-    news('sword', '#b33a2a', `${nn(a)}, ${nn(b)} ulusuna savaş ilan etti!`, involved ? 'Cepheler alevlendi. Ordular sınırda.' : '', involved);
+    if (involved || map.kind !== 'world' || (major(a) && major(b))) news('sword', '#b33a2a', `${nn(a)}, ${nn(b)} ulusuna savaş ilan etti!`, involved ? 'Cepheler alevlendi. Ordular sınırda.' : '', involved);
     if (involved && !silent) LOL.audio.play('war');
     // allies of defender join
     alliesOf(b).forEach((ally) => {
@@ -574,12 +582,13 @@
     });
     dirty = true; updateTop();
   }
+  function major(nid) { return provsOf(nid).length >= 6; }
   function makePeace(a, b) {
     G.wars.delete(key(a, b));
     G.truce[key(a, b)] = G.turn + 8;
     addRel(a, b, 20);
     const involved = isPlayer(a) || isPlayer(b);
-    news('dove', '#3c8a4a', `${nn(a)} ve ${nn(b)} barış antlaşması imzaladı.`, '8 ay sürecek bir ateşkes başladı.', involved);
+    if (involved || map.kind !== 'world' || (major(a) && major(b))) news('dove', '#3c8a4a', `${nn(a)} ve ${nn(b)} barış antlaşması imzaladı.`, '8 ay sürecek bir ateşkes başladı.', involved);
     if (involved) LOL.audio.play('peace');
     dirty = true; updateTop();
   }
@@ -663,7 +672,7 @@
 
   function sideCard(n, units, label) {
     return `<div class="side"><div class="nm">${UI.flag(n, 16)}${U.esc(n.name)}</div><small>${label}</small>
-      <div class="units-row">${U.TYPES.map((t) => `<div class="ucard"><img src="${UI.unitIcon(t, n.color)}"><div class="n">${units[t]}</div><div class="t">${C.unitName[t]}</div></div>`).join('')}</div></div>`;
+      <div class="units-row">${U.TYPES.filter((t) => units[t] > 0).map((t) => `<div class="ucard"><img src="${UI.unitIcon(t, n.color)}"><div class="n">${units[t]}</div><div class="t">${C.unitShort[t]}</div></div>`).join('')}</div></div>`;
   }
 
   async function moveArmy(from, to, units) {
@@ -678,9 +687,9 @@
     const defender = to.owner;
     animMove(from, to, units, owner);
     if (U.sumUnits(to.units) === 0) {
-      await U.sleep(300);
+      if (isPlayer(owner) || isPlayer(defender)) await U.sleep(300);
       capture(to, owner, units);
-      news('flag', U.shade(nation(owner).color, -0.3), `${nn(owner)}, ${U.esc(to.name)} bölgesini direnişsiz ele geçirdi.`, '', isPlayer(owner) || isPlayer(defender));
+      if (isPlayer(owner) || isPlayer(defender) || map.kind !== 'world') news('flag', U.shade(nation(owner).color, -0.3), `${nn(owner)}, ${U.esc(to.name)} bölgesini direnişsiz ele geçirdi.`, '', isPlayer(owner) || isPlayer(defender));
       checkGameOver();
       return;
     }
@@ -711,7 +720,7 @@
       }
       if (choice === 'tactical') {
         result = await LOL.app.startBattle({
-          provinceName: to.name, terrain: to.terrain, fort: Math.round(to.buildings.fort * (1 + (eff(defender).fort || 0))),
+          provinceName: to.name, terrain: to.terrain, biome: to.biome, month: ((G.turn - 1) % 12) + 1, fort: Math.round(to.buildings.fort * (1 + (eff(defender).fort || 0))),
           attacker: nation(owner), defender: nation(defender),
           attUnits: U.copyUnits(units), defUnits: U.copyUnits(to.units),
           attEff: eff(owner), defEff: eff(defender),
@@ -731,7 +740,7 @@
         [{ label: 'Devam', value: 1, cls: 'primary' }], { cls: win ? 'win' : 'lose' });
       }
     } else {
-      await U.sleep(140);
+      if (map.kind !== 'world') await U.sleep(120);
       result = autoResolve(units, to.units, to, owner, defender);
     }
     applyResult(from, to, owner, defender, result);
@@ -747,7 +756,7 @@
         if (ref) U.TYPES.forEach((t) => { ref.units[t] += dsurv[t]; });
       }
       capture(to, att, r.attSurv);
-      news('sword', isPlayer(att) ? '#3c7a3a' : isPlayer(def) ? '#a83226' : '#6a4a2a', `${nn(att)} ordusu ${U.esc(to.name)} bölgesini fethetti.`, involved ? `${nn(def)} savunması çöktü.` : '', involved);
+      if (involved || map.kind !== 'world') news('sword', isPlayer(att) ? '#3c7a3a' : isPlayer(def) ? '#a83226' : '#6a4a2a', `${nn(att)} ordusu ${U.esc(to.name)} bölgesini fethetti.`, involved ? `${nn(def)} savunması çöktü.` : '', involved);
     } else {
       to.units = U.copyUnits(r.defSurv);
       U.TYPES.forEach((t) => { to.ready[t] = Math.min(to.ready[t], to.units[t]); });
@@ -860,7 +869,7 @@
     const myPow = nationPower(me);
     const wars = enemiesOf(me);
     // --- diplomacy
-    if (wars.length === 0 && G.turn >= 3 && Math.random() < 0.28) {
+    if (wars.length === 0 && G.turn >= 3 && Math.random() < (map.kind === 'world' ? 0.06 : 0.28)) {
       const cands = neighborNations(me).filter((o) => !truce(me, o) && !allied(me, o));
       let best = -1, br = 1e9;
       for (const o of cands) {
@@ -887,7 +896,7 @@
       }
     }
     // alliances among AIs / offer to player
-    if (Math.random() < 0.08) {
+    if (Math.random() < (map.kind === 'world' ? 0.015 : 0.08)) {
       const cands = G.nations.filter((o) => o.alive && o.id !== me && !allied(me, o.id) && !atWar(me, o.id) && rel(me, o.id) > 35);
       const o = cands[Math.floor(Math.random() * cands.length)];
       if (o) {
@@ -916,7 +925,9 @@
     const reserve = enemyIds.size ? 10 : 35;
     for (let guard = 0; guard < 40 && n.gold - reserve >= C.cost.inf && n.manpower >= MP_COST.inf; guard++) {
       const r = Math.random();
-      let t = r < 0.55 ? 'inf' : r < 0.82 ? 'tank' : 'art';
+      const pool = [['inf', 30], ['mg', 8], ['at', 9], ['recon', 6], ['tank', 20], ['heavy', 6], ['art', 12], ['rocket', 5]].filter(([k]) => !C.req[k] || n.techs.includes(C.req[k]));
+      let rr = r * pool.reduce((s2, x) => s2 + x[1], 0), t = 'inf';
+      for (const [k, w] of pool) { rr -= w; if (rr <= 0) { t = k; break; } }
       const p = front.sort((a, b) => threat(b, me) - threat(a, me) + (Math.random() - 0.5) * 4)[0];
       if (n.gold - reserve < unitCost(me, t, p) || n.manpower < MP_COST[t]) t = 'inf';
       if (!recruit(p, t, 1)) break;
@@ -1023,6 +1034,7 @@
   // ---------------------------------------------------------------- top bar & panels
   function updateTop() {
     if (!G || G.playerId < 0) {
+      if (LOL.advisor) LOL.advisor.refresh();
       U.el('tb-nation').style.visibility = 'hidden';
       U.el('tb-date').textContent = G ? dateStr(G.turn) : '';
       U.el('tb-wars').innerHTML = '';
@@ -1046,6 +1058,7 @@
     U.el('tb-wars').innerHTML = (ws.length ? '<span class="war">⚔ ' + ws.map((w) => U.esc(w.name)).join(', ') + '</span>' : '<span class="peace">Barış</span>') +
       (al.length ? ' · <span style="color:#a8d8ff">🤝 ' + al.map((w) => U.esc(w.name)).join(', ') + '</span>' : '');
     U.el('endturn-label').textContent = MONTHS[G.turn % 12];
+    if (LOL.advisor) LOL.advisor.refresh();
     U.el('endturn-info').textContent = cur ? '' : 'Araştırma seçilmedi';
     if (!cur) U.el('endturn-info').innerHTML = '<span style="color:#e8c050">⚠ Araştırma seçilmedi</span>';
   }
@@ -1089,7 +1102,7 @@
         <div class="stat"><div class="k">Savunma</div><div class="v">×${defBonus(p).toFixed(2)}</div></div>
         <div class="stat"><div class="k">Binalar</div><div class="v" style="font-size:12px">${Object.keys(BUILD).map((k) => `${UI.icon(BUILD[k].ico, 14)}${p.buildings[k]}`).join(' ')}</div></div></div>
         <div class="sect-title">Garnizon</div>
-        <div class="units-row">${U.TYPES.map((t) => `<div class="ucard"><img src="${UI.unitIcon(t, n.color)}"><div class="n">${p.units[t]}</div><div class="t">${C.unitName[t]}${own ? ` <span class="r">(${p.ready[t]} hazır)</span>` : ''}</div></div>`).join('')}</div>`;
+        ${U.sumUnits(p.units) ? `<div class="units-row">${U.TYPES.filter((t) => p.units[t] > 0).map((t) => `<div class="ucard" title="${C.unitName[t]}: ${C.unitDesc[t]}"><img src="${UI.unitIcon(t, n.color)}"><div class="n">${p.units[t]}</div><div class="t">${C.unitShort[t]}${own ? ` <span class="r">${p.ready[t]} hazır</span>` : ''}</div></div>`).join('')}</div>` : '<div class="hint">Garnizon yok — bölge savunmasız!</div>'}`;
       if (own && U.sumUnits(p.ready) > 0) body += sendHtml(p);
       if (!own && phase === 'play') {
         body += `<div class="sect-title">Diplomasi</div><div class="row"><span>İlişki</span><b>${rel(me, p.owner)}</b></div><div class="btnrow">` +
@@ -1101,10 +1114,10 @@
       const nat = nation(me);
       body += `<div class="sect-title">Asker Topla</div><div class="rec-grid">${U.TYPES.map((t) => {
         const c = unitCost(me, t, p);
-        return `<button data-act="rec" data-t="${t}" ${nat.gold < c || nat.manpower < MP_COST[t] || phase !== 'play' ? 'disabled' : ''}><img src="${UI.unitIcon(t, n.color)}" style="width:52px;height:34px;border-radius:4px"><span>${C.unitName[t]}</span><small>${c} altın</small><small class="mp">${fmtK(MP_COST[t])} kişi</small></button>`;
-      }).join('')}</div><div class="hint">Shift+tık: 5 adet. Yeni birlikler gelecek ay hareket edebilir.</div>`;
-      body += `<div class="sect-title">Birlik Özellikleri</div><div class="hint" style="margin-top:0">
-        <b>Piyade</b> — ucuz, piyadeye karşı etkili.<br><b>Tank</b> — zırhlı, hareket ederken ateş eder.<br><b>Topçu</b> — çok uzun menzil, alan hasarı.</div>`;
+        const lock = C.req[t] && !nat.techs.includes(C.req[t]);
+        const dis = lock || nat.gold < c || nat.manpower < MP_COST[t] || phase !== 'play';
+        return `<button data-act="rec" data-t="${t}" ${dis ? 'disabled' : ''} title="${C.unitName[t]} — ${C.unitDesc[t]}${lock ? ' (Gerekli teknoloji: ' + TECH[C.req[t]].name + ')' : ''}"><img src="${UI.unitIcon(t, n.color)}"><span>${C.unitShort[t]}</span>${lock ? `<small class="mp">🔒 ${TECH[C.req[t]].name}</small>` : `<small>${c} altın</small><small class="mp">${fmtK(MP_COST[t])} kişi</small>`}</button>`;
+      }).join('')}</div><div class="hint">Shift+tık: 5 adet. Yeni birlikler gelecek ay hareket edebilir. Birliklerin üzerine gelince açıklamasını görürsün.</div>`;
       if (U.sumUnits(p.ready) > 0) body += sendHtml(p);
     } else if (selTab === 'insa') {
       const nat = nation(me);
@@ -1123,7 +1136,7 @@
   }
   function sendHtml(p) {
     return `<div class="sect-title">Sefer Kuvveti</div>
-      ${U.TYPES.filter((t) => p.ready[t] > 0).map((t) => `<div class="send-row"><span>${C.unitName[t]}</span><input type="range" min="0" max="${p.ready[t]}" value="${Math.min(send[t], p.ready[t])}" data-send="${t}"><b id="sv-${t}">${Math.min(send[t], p.ready[t])}</b></div>`).join('')}
+      ${U.TYPES.filter((t) => p.ready[t] > 0).map((t) => `<div class="send-row"><span>${C.unitShort[t]}</span><input type="range" min="0" max="${p.ready[t]}" value="${Math.min(send[t], p.ready[t])}" data-send="${t}"><b id="sv-${t}">${Math.min(send[t], p.ready[t])}</b></div>`).join('')}
       <div class="hint">Haritada komşu bir bölgeye <b>sağ tıkla</b>. Düşman bölgesine gönderirsen muharebe başlar.</div>`;
   }
 
@@ -1274,6 +1287,7 @@
   function startGame(nid) {
     G.playerId = nid;
     G.news = [];
+    if (LOL.advisor) LOL.advisor.reset();
     const n = nation(nid);
     news('crown', '#a8741a', `${nn(nid)} hükümdarı göreve başladı`, `${U.esc(n.leader)}: "Atalarımızın topraklarını genişletmenin vakti geldi."`, true);
     news('globe', '#3a4a6a', 'Dünya gerginliğin eşiğinde', 'Sekiz büyük güç sınırlarına asker yığıyor. Diplomatlar barışı korumaya çalışıyor.', false);
@@ -1293,16 +1307,19 @@
     }, 300);
   }
 
-  S.startPick = function () {
-    S.newMap((Math.random() * 1e9) >>> 0);
+  S.startPick = function (kind) {
+    S.pickKind = kind || S.pickKind || 'world';
+    S.newMap((Math.random() * 1e9) >>> 0, S.pickKind);
+    document.querySelectorAll('#pick-banner [data-kind]').forEach((b) => b.classList.toggle('on', b.dataset.kind === S.pickKind));
+    U.el('btn-newmap').classList.toggle('hidden', S.pickKind === 'world');
     S.setPhase('pick');
   };
 
   function save(silent) {
     if (!G || G.playerId < 0) return;
     const data = {
-      seed: G.seed, turn: G.turn, playerId: G.playerId,
-      nations: G.nations.map((n) => ({ gold: n.gold, alive: n.alive, capital: n.capital, manpower: n.manpower, stability: n.stability, techs: n.techs, research: n.research, gov: n.gov, leader: n.leader, flagSeed: n.flagSeed })),
+      seed: G.seed, kind: G.kind, turn: G.turn, playerId: G.playerId,
+      nations: G.nations.map((n) => ({ advisor: n.advisor, gold: n.gold, alive: n.alive, capital: n.capital, manpower: n.manpower, stability: n.stability, techs: n.techs, research: n.research, gov: n.gov, leader: n.leader, flagSeed: n.flagSeed })),
       provinces: G.provinces.map((p) => ({ o: p.owner, u: p.units, r: p.ready, c: p.isCapital, b: p.buildings, q: p.queue })),
       wars: [...G.wars], allies: [...G.allies], truce: G.truce, rel: G.rel, news: G.news.slice(0, 30),
     };
@@ -1316,7 +1333,7 @@
     let data;
     try { data = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { return false; }
     if (!data) return false;
-    S.newMap(data.seed);
+    S.newMap(data.seed, data.kind);
     G.turn = data.turn; G.playerId = data.playerId;
     data.nations.forEach((d, i) => Object.assign(G.nations[i], d));
     data.provinces.forEach((d, i) => { const p = G.provinces[i]; p.owner = d.o; p.units = d.u; p.ready = d.r; p.isCapital = d.c; p.buildings = d.b; p.queue = d.q; });
@@ -1336,6 +1353,7 @@
     U.el('tb-nation').onclick = () => { if (phase === 'play' || phase === 'busy') { LOL.audio.play('click'); nationScreen(); } };
     U.el('btn-save').onclick = () => { LOL.audio.play('click'); save(false); };
     U.el('btn-newmap').onclick = () => { LOL.audio.play('click'); S.startPick(); };
+    document.querySelectorAll('#pick-banner [data-kind]').forEach((b) => { b.onclick = () => { LOL.audio.play('click'); U.el('pick-banner').classList.add('loading'); setTimeout(() => { S.startPick(b.dataset.kind); U.el('pick-banner').classList.remove('loading'); }, 30); }; });
     U.el('btn-sound').onclick = () => { LOL.audio.play('click'); S.settings(); };
     U.el('news-toggle').onclick = () => { U.el('news').classList.toggle('collapsed'); };
     U.el('btn-menu').onclick = async () => {
@@ -1372,6 +1390,61 @@
     });
     ['prov-panel', 'news', 'mapmodes', 'topbar', 'endturn-wrap', 'pick-banner'].forEach((id) => U.el(id).addEventListener('mousedown', (e) => e.stopPropagation()));
   };
+
+  // ---------------------------------------------------------------- advisor hooks
+  S.analysis = function () {
+    if (!G || G.playerId < 0 || (phase !== 'play' && phase !== 'busy')) return null;
+    const me = G.playerId, n = nation(me), ec = economy(me);
+    const mine = provsOf(me), myPow = nationPower(me);
+    const threats = [], opps = [];
+    for (const p of mine) {
+      let e = 0, enemyId = -1, big = 0;
+      for (const q of p.neighbors.map(P)) {
+        if (!atWar(me, q.owner)) continue;
+        const qp = powerOf(q.units, q.owner);
+        e += qp;
+        if (qp > big) { big = qp; enemyId = q.owner; }
+        const ratio = powerOf(p.ready, me) / Math.max(0.5, qp * defBonus(q));
+        if (ratio > 1.5 && powerOf(p.ready, me) >= 3) opps.push({ from: p.id, fromName: p.name, to: q.id, toName: q.name, att: Math.round(powerOf(p.ready, me)), def: Math.round(qp * defBonus(q)), ratio });
+      }
+      const my = powerOf(p.units, me) * defBonus(p);
+      if (e > my * 1.1 && enemyId >= 0) threats.push({ id: p.id, name: p.name, enemy: nation(enemyId).name, enemyPower: Math.round(e), myPower: Math.round(my), gap: e - my });
+    }
+    threats.sort((a, b) => b.gap - a.gap);
+    opps.sort((a, b) => b.ratio - a.ratio);
+    const stronger = enemiesOf(me).filter((x) => nationPower(x.id) > myPow * 1.5).map((x) => x.name);
+    const weak = neighborNations(me).filter((o) => !atWar(me, o) && !allied(me, o) && !truce(me, o)).sort((a, b) => nationPower(a) - nationPower(b))[0];
+    const cur = n.research.cur ? TECH[n.research.cur] : null;
+    const unitList = (u) => Object.fromEntries(U.TYPES.filter((t) => u[t] > 0).map((t) => [C.unitName[t], u[t]]));
+    return {
+      me, turn: G.turn, date: dateStr(G.turn), nationName: n.name, color: n.color, seed: n.flagSeed || me,
+      advisorName: n.advisor || 'Orgeneral Hasan Arda',
+      ec, gold: n.gold, manpower: n.manpower, stability: n.stability, research: cur, capital: n.capital,
+      wars: enemiesOf(me).map((x) => x.name), threats, opportunities: opps, stronger,
+      weakNeighbor: weak != null && nationPower(weak) < myPow * 0.6 ? nation(weak).name : null,
+      forLLM: {
+        tarih: dateStr(G.turn), ulus: n.name, yonetim: n.gov, lider: n.leader,
+        hazine: Math.floor(n.gold), aylikNetGelir: ec.net, insanGucu: Math.round(n.manpower), istikrar: Math.round(n.stability),
+        arastirma: cur ? cur.name : 'yok', teknolojiler: n.techs.map((t) => TECH[t].name), orduGucu: Math.round(myPow), bolgeSayisi: mine.length,
+        savaslar: enemiesOf(me).map((x) => ({ ulus: x.name, guc: Math.round(nationPower(x.id)), bolge: provsOf(x.id).length })),
+        muttefikler: alliesOf(me).map((x) => x.name),
+        komsular: neighborNations(me).slice(0, 14).map((o) => ({ ulus: nation(o).name, guc: Math.round(nationPower(o)), iliski: Math.round(rel(me, o)), durum: atWar(me, o) ? 'savaş' : allied(me, o) ? 'müttefik' : truce(me, o) ? 'ateşkes' : 'barış' })),
+        bolgelerim: mine.slice(0, 30).map((p) => ({ ad: p.name, arazi: p.terrain, birlikler: unitList(p.units), binalar: p.buildings, baskent: p.isCapital || undefined })),
+        tehditler: threats.slice(0, 5).map((t) => `${t.name}: düşman ${t.enemyPower} / biz ${t.myPower}`),
+        firsatlar: opps.slice(0, 5).map((o) => `${o.fromName} -> ${o.toName} (${o.att} vs ${o.def})`),
+      },
+    };
+  };
+  S.focusProvince = function (id) {
+    if (!G || id == null || id < 0) return;
+    sel = id; selTab = 'genel'; send = U.copyUnits(P(id).ready);
+    const p = P(id);
+    cam.s = Math.max(cam.s, map.kind === 'world' ? 2.6 : 1.6);
+    cam.x = canvas.width / 2 - p.cx * cam.s; cam.y = canvas.height / 2 - p.cy * cam.s;
+    dirty = true; updatePanel();
+  };
+  S.openTech = () => { if (phase === 'play') techScreen(); };
+  S.openDiplo = () => { if (phase === 'play') diplomacy(); };
 
   S.refresh = function () { dirty = true; updatePanel(); updateTop(); renderNews(); };
   S.debug = () => ({ G, map, cam, sel, phase });

@@ -50,7 +50,11 @@
   <div id="pick-banner" class="hidden">
     <div class="pb-title">Ulusunu Seç</div>
     <div class="pb-sub">Haritada bir ülkeye tıkla. Her ulusun konumu, gücü ve komşuları farklıdır.</div>
-    <button id="btn-newmap">Yeni Dünya Oluştur</button>
+    <div class="pb-row">
+      <button data-kind="world">🌍 Gerçek Dünya (1936)</button>
+      <button data-kind="fantasy">🗺 Hayali Dünya</button>
+      <button id="btn-newmap">Yeni Hayali Dünya</button>
+    </div>
   </div>
 
   <div id="prov-panel" class="panel hidden"></div>
@@ -72,6 +76,7 @@
     <div id="endturn-info"></div>
     <button id="btn-endturn"><span data-ico="next"></span><span id="endturn-label">Sonraki Ay</span></button>
   </div>
+  <div id="advisor" class="advisor collapsed hidden"></div>
   <div id="busy" class="hidden"><div class="spinner"></div><span id="busy-text">Dünya hamle yapıyor...</span></div>
 </div>
 
@@ -115,9 +120,13 @@
 <script src="js/util.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/ui.js"></script>
+<script src="js/worlddata.js"></script>
+<script src="js/worldinfo.js"></script>
 <script src="js/mapgen.js"></script>
 <script src="js/battle.js"></script>
 <script src="js/strategy.js"></script>
+<script src="js/vendor-anthropic.js"></script>
+<script src="js/advisor.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

@@ -157,7 +157,7 @@
   }
 
   // ---------------- sound library ----------------
-  const GAP = { rifle: 35, mg: 60, cannon: 70, artfire: 120, boom: 60, small: 45, click: 25, whistle: 250, radio: 300, hit: 40 };
+  const GAP = { rifle: 35, mg: 140, bazooka: 120, rocketfire: 400, rocket: 90, cannon: 70, artfire: 120, boom: 60, small: 45, click: 25, whistle: 250, radio: 300, hit: 40 };
 
   A.play = function (name, vol, pan) {
     if (!A.enabled || !C) return;
@@ -177,6 +177,33 @@
         noise(o, t, r(0.07, 0.11), 'lowpass', r(1100, 1800), 0.7, 0.75, 0.001);
         osc(o, t, 0.06, 'sine', r(150, 190), 55, 0.55, 0.001);
         noise(o, t + 0.02, 0.25, 'bandpass', 900, 0.8, 0.06, 0.02);
+        break;
+      case 'mg': {
+        // short automatic burst
+        o = chain(vol * 0.75, pan, 0.2, 2.4);
+        const n = 3 + Math.floor(Math.random() * 2);
+        for (let i = 0; i < n; i++) {
+          const tt = t + i * 0.065;
+          noise(o, tt, 0.012, 'highpass', 2300, 0, 0.7, 0.0008);
+          noise(o, tt, 0.06, 'lowpass', r(900, 1400), 0.7, 0.6, 0.001);
+          osc(o, tt, 0.045, 'sine', r(130, 160), 60, 0.4, 0.001);
+        }
+        break;
+      }
+      case 'bazooka':
+        o = chain(vol, pan, 0.3, 2);
+        noise(o, t, 0.05, 'lowpass', 700, 0, 0.9, 0.002);
+        noise(o, t, 0.6, 'bandpass', 1200, 0.8, 0.35, 0.02, 400);
+        osc(o, t, 0.15, 'sine', 120, 50, 0.6, 0.002);
+        break;
+      case 'rocketfire':
+        o = chain(vol, pan, 0.35, 2);
+        noise(o, t, 1.6, 'bandpass', 900, 0.6, 0.45, 0.05, 2600);
+        break;
+      case 'rocket':
+        o = chain(vol * 0.8, pan, 0.3, 2);
+        noise(o, t, 0.5, 'bandpass', r(1400, 2200), 1, 0.4, 0.01, 500);
+        osc(o, t, 0.12, 'sine', 90, 40, 0.4, 0.002);
         break;
       case 'hit':
         o = chain(vol * 0.5, pan, 0.1, 1.2);
@@ -290,6 +317,25 @@
         break;
       }
     }
+  };
+  // looping weather bed (rain / snow wind / dust storm)
+  let wxNodes = null;
+  A.weather = function (kind) {
+    if (!C) return;
+    if (wxNodes) { wxNodes.forEach((n) => { try { n.stop(); } catch (e) { /* ignore */ } }); wxNodes = null; }
+    if (!kind) return;
+    const s = C.createBufferSource(); s.buffer = noiseBuf; s.loop = true;
+    const f = C.createBiquadFilter();
+    const g = C.createGain();
+    if (kind === 'rain') { f.type = 'highpass'; f.frequency.value = 1800; g.gain.value = 0.07; }
+    else if (kind === 'snow') { f.type = 'bandpass'; f.frequency.value = 350; f.Q.value = 0.4; g.gain.value = 0.09; }
+    else { f.type = 'bandpass'; f.frequency.value = 700; f.Q.value = 0.5; g.gain.value = 0.08; }
+    const lfo = C.createOscillator(); lfo.frequency.value = 0.09;
+    const lg = C.createGain(); lg.gain.value = g.gain.value * 0.5;
+    lfo.connect(lg); lg.connect(g.gain);
+    s.connect(f); f.connect(g); g.connect(sfxBus);
+    s.start(); lfo.start();
+    wxNodes = [s, lfo];
   };
   A.whistle = function (dur, vol, pan) {
     A._whistleDur = dur;

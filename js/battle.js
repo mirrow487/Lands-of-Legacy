@@ -5,15 +5,34 @@
   // ======================================================================
   const U = LOL.util;
   const TW = 64, TH = 32, N = 48, SIDEBAR = 232;
-  const T_GRASS = 0, T_DGRASS = 1, T_DIRT = 2, T_SAND = 3, T_WATER = 4, T_FORD = 5, T_ROAD = 6;
-  const TILE_RGB = [[92, 132, 60], [72, 112, 46], [138, 116, 78], [200, 182, 128], [38, 86, 128], [84, 128, 142], [150, 126, 88]];
+  const T_GRASS = 0, T_DGRASS = 1, T_DIRT = 2, T_SAND = 3, T_WATER = 4, T_FORD = 5, T_ROAD = 6, T_BRIDGE = 7, T_FIELD = 8;
+  const PALETTES = {
+    temperate: [[92, 132, 60], [72, 112, 46], [138, 116, 78], [200, 182, 128], [38, 86, 128], [84, 128, 142], [150, 126, 88], [38, 86, 128], [176, 158, 74]],
+    desert: [[196, 170, 112], [178, 150, 96], [168, 128, 82], [222, 198, 142], [46, 110, 140], [110, 150, 150], [160, 130, 92], [46, 110, 140], [170, 160, 80]],
+    snow: [[226, 230, 236], [206, 214, 222], [170, 168, 170], [216, 216, 210], [70, 100, 130], [150, 170, 185], [150, 140, 130], [70, 100, 130], [214, 214, 206]],
+  };
+  let TILE_RGB = PALETTES.temperate;
 
   const UT = {
-    inf: { name: 'Piyade', hp: 60, speed: 1.45, range: 4.2, minRange: 0, sight: 6.5, dmg: 9, rof: 0.8, radius: 0.2, armor: 'inf', weapon: 'rifle', turn: 12 },
-    tank: { name: 'Tank', hp: 320, speed: 2.0, range: 5.2, minRange: 0, sight: 7, dmg: 46, rof: 2.1, radius: 0.4, armor: 'veh', weapon: 'cannon', turn: 3.0, turretTurn: 4.5, splash: 0.55 },
+    inf: { name: 'Piyade', foot: true, hp: 60, speed: 1.45, range: 4.2, minRange: 0, sight: 6.5, dmg: 9, rof: 0.8, radius: 0.2, armor: 'inf', weapon: 'rifle', turn: 12 },
+    mg: { name: 'Makineli Tüfek', foot: true, hp: 70, speed: 1.1, range: 5.2, minRange: 0, sight: 7, dmg: 4.2, rof: 0.16, radius: 0.24, armor: 'inf', weapon: 'mg', turn: 8, burst: 1 },
+    at: { name: 'Tanksavar', foot: true, hp: 55, speed: 1.3, range: 4.8, minRange: 0, sight: 6.5, dmg: 70, rof: 3.4, radius: 0.2, armor: 'inf', weapon: 'atr', turn: 10 },
+    recon: { name: 'Zırhlı Keşif', hp: 160, speed: 3.3, range: 5, minRange: 0, sight: 10, dmg: 6, rof: 0.22, radius: 0.36, armor: 'light', weapon: 'mg', turn: 5, turret: true, turretTurn: 7 },
+    tank: { name: 'Tank', hp: 320, speed: 2.0, range: 5.2, minRange: 0, sight: 7, dmg: 46, rof: 2.1, radius: 0.4, armor: 'heavy', weapon: 'cannon', turn: 3.0, turret: true, turretTurn: 4.5, splash: 0.55 },
+    heavy: { name: 'Ağır Tank', hp: 680, speed: 1.3, range: 5.8, minRange: 0, sight: 7, dmg: 88, rof: 3.0, radius: 0.5, armor: 'heavy', weapon: 'bigcannon', turn: 1.8, turret: true, turretTurn: 2.6, splash: 0.75 },
     art: { name: 'Topçu', hp: 140, speed: 1.2, range: 10.5, minRange: 3, sight: 11, dmg: 80, rof: 4.6, radius: 0.38, armor: 'art', weapon: 'shell', turn: 2.4, splash: 1.4 },
+    rocket: { name: 'Roket Topçusu', hp: 150, speed: 1.6, range: 12, minRange: 4, sight: 12.5, dmg: 32, rof: 10, radius: 0.4, armor: 'art', weapon: 'rocket', turn: 2.6, splash: 1.1, salvo: 8 },
   };
-  const MULT = { rifle: { inf: 1, veh: 0.15, art: 0.45 }, cannon: { inf: 0.55, veh: 1, art: 1.1 }, shell: { inf: 1, veh: 0.5, art: 0.8 } };
+  const isFoot = (u) => UT[u.type].foot;
+  const MULT = {
+    rifle: { inf: 1, light: 0.3, heavy: 0.08, art: 0.45 },
+    mg: { inf: 1.35, light: 0.35, heavy: 0.04, art: 0.4 },
+    atr: { inf: 0.35, light: 1.2, heavy: 1.05, art: 1 },
+    cannon: { inf: 0.55, light: 1.1, heavy: 0.85, art: 1.1 },
+    bigcannon: { inf: 0.6, light: 1.2, heavy: 1, art: 1.2 },
+    shell: { inf: 1, light: 0.7, heavy: 0.45, art: 0.8 },
+    rocket: { inf: 1, light: 0.6, heavy: 0.35, art: 0.8 },
+  };
   const MAX_PER_SIDE = 36;
 
   const B = (LOL.battle = { UT });
@@ -41,7 +60,7 @@
   //  Map generation
   // ======================================================================
   function genMap(seed, defSide, terrain, fort) {
-    const TR = { 'Ova': { tree: 0.68, rnd: 0.006, rock: 0.004, river: 0.4, lake: 0.28 }, 'Ormanlık': { tree: 0.5, rnd: 0.03, rock: 0.004, river: 0.4, lake: 0.26 }, 'Tepelik': { tree: 0.64, rnd: 0.01, rock: 0.03, river: 0.25, lake: 0.22 }, 'Kıyı': { tree: 0.7, rnd: 0.006, rock: 0.006, river: 0.9, lake: 0.36 } }[terrain] || { tree: 0.6, rnd: 0.012, rock: 0.006, river: 0.55, lake: 0.3 };
+    const TR = { 'Ova': { tree: 0.68, rnd: 0.006, rock: 0.004, river: 0.4, lake: 0.28 }, 'Ormanlık': { tree: 0.5, rnd: 0.03, rock: 0.004, river: 0.4, lake: 0.26 }, 'Tepelik': { tree: 0.64, rnd: 0.01, rock: 0.03, river: 0.25, lake: 0.22 }, 'Kıyı': { tree: 0.7, rnd: 0.006, rock: 0.006, river: 0.9, lake: 0.36 }, 'Çöl': { tree: 0.8, rnd: 0.003, rock: 0.02, river: 0.15, lake: 0.18 }, 'Tundra': { tree: 0.6, rnd: 0.012, rock: 0.015, river: 0.35, lake: 0.26 } }[terrain] || { tree: 0.6, rnd: 0.012, rock: 0.006, river: 0.55, lake: 0.3 };
     const rng = U.rng(seed);
     const nz = U.noise(seed + 3), nz2 = U.noise(seed + 9), nz3 = U.noise(seed + 15);
     const tiles = new Uint8Array(N * N), block = new Uint8Array(N * N);
@@ -68,7 +87,7 @@
       const x = Math.floor(U.lerp(P.x, E.x, s) + w * 0.7), y = Math.floor(U.lerp(P.y, E.y, s) + w * 0.7);
       if (!inb(x, y)) continue;
       const i = y * N + x;
-      tiles[i] = tiles[i] === T_WATER || tiles[i] === T_FORD ? T_FORD : T_ROAD;
+      tiles[i] = tiles[i] === T_WATER || tiles[i] === T_FORD || tiles[i] === T_BRIDGE ? T_BRIDGE : T_ROAD;
       roadTiles.push(i);
     }
     if (river) {
@@ -83,7 +102,7 @@
     const isW = (x, y) => inb(x, y) && tiles[y * N + x] === T_WATER;
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       const i = y * N + x;
-      if (tiles[i] === T_WATER || tiles[i] === T_FORD || tiles[i] === T_ROAD) continue;
+      if (tiles[i] === T_WATER || tiles[i] === T_FORD || tiles[i] === T_ROAD || tiles[i] === T_BRIDGE) continue;
       if (isW(x - 1, y) || isW(x + 1, y) || isW(x, y - 1) || isW(x, y + 1) || isW(x - 1, y - 1) || isW(x + 1, y + 1)) {
         if (rng.next() < 0.85) tiles[i] = T_SAND;
       }
@@ -94,7 +113,7 @@
     const freeTile = (x, y, margin) => {
       if (!inb(x, y)) return false;
       const t = tiles[y * N + x];
-      if (t === T_WATER || t === T_FORD || t === T_ROAD) return false;
+      if (t === T_WATER || t === T_FORD || t === T_ROAD || t === T_BRIDGE || t === T_FIELD) return false;
       if (block[y * N + x]) return false;
       if (Math.hypot(x - P.x, y - P.y) < (margin || 6) || Math.hypot(x - E.x, y - E.y) < (margin || 6)) return false;
       return true;
@@ -160,6 +179,31 @@
       if ((f > TR.tree && rng.next() < 0.6) || rng.next() < TR.rnd) place({ type: 'tree', x, y, w: 1, d: 1, v: rng.int(0, 3) });
       else if (rng.next() < TR.rock) place({ type: 'rock', x, y, w: 1, d: 1, v: rng.next() });
     }
+    // fields near the town (with fences)
+    const placeDeco = (o) => { o.deco = true; objects.push(o); };
+    for (let k = 0; k < 4; k++) {
+      const fx0 = Math.round(town.x + rng.range(-12, 12)), fy0 = Math.round(town.y + rng.range(-12, 12));
+      const fw = rng.int(3, 5), fd = rng.int(3, 5);
+      let ok = true;
+      for (let y = fy0; y < fy0 + fd && ok; y++) for (let x = fx0; x < fx0 + fw && ok; x++) if (!freeTile(x, y, 7) || tiles[y * N + x] === T_SAND) ok = false;
+      if (!ok) continue;
+      for (let y = fy0; y < fy0 + fd; y++) for (let x = fx0; x < fx0 + fw; x++) tiles[y * N + x] = T_FIELD;
+      for (let x = fx0; x < fx0 + fw; x++) { placeDeco({ type: 'fence', x, y: fy0 + fd, w: 1, d: 0.05, dir: 0 }); }
+      for (let y = fy0; y < fy0 + fd; y++) { placeDeco({ type: 'fence', x: fx0 + fw, y, w: 0.05, d: 1, dir: 1 }); }
+    }
+    // telegraph poles along the road
+    roadTiles.forEach((i, k) => {
+      if (k % 5 !== 2) return;
+      const x = (i % N) + 1, y = ((i / N) | 0);
+      if (inb(x, y) && freeTile(x, y, 3)) placeDeco({ type: 'pole', x, y, w: 1, d: 1 });
+    });
+    // burnt-out wrecks from earlier fighting
+    for (let k = 0, n = rng.int(1, 3); k < 40 && n > 0; k++) {
+      const x = rng.int(12, N - 12), y = rng.int(12, N - 12);
+      if (!freeTile(x, y, 8)) continue;
+      place({ type: 'wreck', x, y, w: 1, d: 1, a: rng.range(0, 6.28), v: rng.int(0, 1) });
+      n--;
+    }
     for (let i = 0; i < N * N; i++) if (tiles[i] === T_WATER) block[i] = 1;
 
     // connectivity check P -> E, carve if needed
@@ -181,7 +225,7 @@
     };
     if (!reach()) {
       for (const i of roadTiles) {
-        if (tiles[i] === T_WATER) tiles[i] = T_FORD;
+        if (tiles[i] === T_WATER) tiles[i] = T_BRIDGE;
         block[i] = 0;
         const oi = objAt[i];
         if (oi >= 0 && objects[oi]) {
@@ -268,7 +312,24 @@
     // details
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       const t = st.tiles[y * N + x];
-      if (t === T_GRASS || t === T_DGRASS) {
+      if (t === T_FIELD) {
+        // furrows / crop rows
+        o.strokeStyle = st.snow ? 'rgba(150,150,160,0.35)' : 'rgba(110,90,30,0.45)'; o.lineWidth = 1;
+        for (let k = 1; k < 5; k++) { const a = [isoX(x + k / 5, y), isoY(x + k / 5, y)], b = [isoX(x + k / 5, y + 1), isoY(x + k / 5, y + 1)]; o.beginPath(); o.moveTo(a[0], a[1]); o.lineTo(b[0], b[1]); o.stroke(); }
+        if (!st.snow) for (let k = 0; k < 10; k++) { const qx = isoX(x + rng.next(), y + rng.next()), qy = isoY(x + rng.next(), y + rng.next()); o.fillStyle = 'rgba(240,210,100,0.5)'; o.fillRect(qx, qy - 2, 1, 2.5); }
+      } else if (t === T_BRIDGE) {
+        // wooden deck
+        o.fillStyle = '#6a4a2a'; diamond(o, x, y, 0); o.fill();
+        o.strokeStyle = 'rgba(30,20,10,0.6)'; o.lineWidth = 1;
+        for (let k = 1; k < 6; k++) { const a = [isoX(x + k / 6, y), isoY(x + k / 6, y)], b = [isoX(x + k / 6, y + 1), isoY(x + k / 6, y + 1)]; o.beginPath(); o.moveTo(a[0], a[1]); o.lineTo(b[0], b[1]); o.stroke(); }
+        o.strokeStyle = '#3a2a18'; o.lineWidth = 2;
+        o.beginPath(); o.moveTo(isoX(x, y), isoY(x, y) - 4); o.lineTo(isoX(x + 1, y), isoY(x + 1, y) - 4); o.stroke();
+        o.beginPath(); o.moveTo(isoX(x, y + 1), isoY(x, y + 1) - 4); o.lineTo(isoX(x + 1, y + 1), isoY(x + 1, y + 1) - 4); o.stroke();
+      } else if (st.climate === 'snow' && (t === T_GRASS || t === T_DGRASS || t === T_DIRT)) {
+        for (let k = 0; k < 3; k++) { const qx = isoX(x + rng.next(), y + rng.next()), qy = isoY(x + rng.next(), y + rng.next()); o.fillStyle = rng.next() < 0.5 ? 'rgba(255,255,255,0.7)' : 'rgba(150,160,175,0.35)'; o.fillRect(qx, qy, 1.5, 1); }
+      } else if (st.climate === 'desert' && (t === T_GRASS || t === T_DGRASS)) {
+        for (let k = 0; k < 2; k++) { const qx = isoX(x + rng.next(), y + rng.next()), qy = isoY(x + rng.next(), y + rng.next()); o.strokeStyle = 'rgba(120,100,50,0.5)'; o.beginPath(); o.moveTo(qx - 2, qy); o.lineTo(qx, qy - 3); o.lineTo(qx + 2, qy); o.stroke(); }
+      } else if (t === T_GRASS || t === T_DGRASS) {
         for (let k = 0; k < 7; k++) {
           const px = isoX(x + rng.next(), y + rng.next()), py = isoY(x + rng.next() * 0, y) + rng.next() * TH;
           const qx = isoX(x + rng.next(), y + rng.next()), qy = isoY(x + rng.next(), y + rng.next());
@@ -308,11 +369,31 @@
     return out;
   }
 
-  function makeTreeSprites() {
+  function makeTreeSprites(climate) {
     const out = [];
     for (let v = 0; v < 4; v++) {
       const c = document.createElement('canvas'); c.width = 48; c.height = 70;
       const g = c.getContext('2d');
+      if (climate === 'desert') {
+        g.fillStyle = 'rgba(0,0,0,0.25)'; g.beginPath(); g.ellipse(30, 62, 13, 5, 0, 0, 7); g.fill();
+        g.strokeStyle = '#7a5a34'; g.lineWidth = 3.2;
+        g.beginPath(); g.moveTo(24, 62); g.quadraticCurveTo(20 + v * 2, 40, 25, 22); g.stroke();
+        g.strokeStyle = '#5f8a2e'; g.lineWidth = 3;
+        for (let k = 0; k < 7; k++) { const a = -Math.PI + k * Math.PI / 6; g.beginPath(); g.moveTo(25, 22); g.quadraticCurveTo(25 + Math.cos(a) * 9, 18 + Math.sin(a) * 4, 25 + Math.cos(a) * 15, 26 + Math.abs(Math.sin(a)) * 2); g.stroke(); }
+        out.push(c); continue;
+      }
+      if (climate === 'snow' && v !== 2) {
+        g.fillStyle = 'rgba(0,0,0,0.2)'; g.beginPath(); g.ellipse(30, 62, 14, 5, 0, 0, 7); g.fill();
+        g.fillStyle = '#4a3420'; g.fillRect(22, 46, 4, 16);
+        for (let k = 0; k < 4; k++) {
+          const yy = 52 - k * 10, ww = 15 - k * 3;
+          g.fillStyle = ['#2e4a36', '#34523c', '#3a5a42', '#406248'][k];
+          g.beginPath(); g.moveTo(24 - ww, yy); g.lineTo(24 + ww, yy); g.lineTo(24, yy - 18); g.closePath(); g.fill();
+          g.fillStyle = 'rgba(245,248,252,0.92)';
+          g.beginPath(); g.moveTo(24 - ww * 0.75, yy - 3); g.lineTo(24 + ww * 0.3, yy - 4); g.lineTo(24, yy - 18); g.closePath(); g.fill();
+        }
+        out.push(c); continue;
+      }
       g.fillStyle = 'rgba(0,0,0,0.28)';
       g.beginPath(); g.ellipse(30, 62, 15, 6, 0, 0, 7); g.fill();
       g.fillStyle = '#5a3e22'; g.fillRect(22, 46, 4, 16);
@@ -357,11 +438,18 @@
 
   B.start = function (cfg) {
     canvas = LOL.app.canvas; ctx = LOL.app.ctx;
-    if (!treeSprites) treeSprites = makeTreeSprites();
+
     return new Promise((resolve) => {
       const playerIsAtt = cfg.playerSide === 'attacker';
       const defSide = playerIsAtt ? 1 : 0;
       const seed = cfg.seed >>> 0;
+      const wr = U.rng(seed + 555);
+      const winter = [12, 1, 2].includes(cfg.month);
+      const climate = cfg.terrain === 'Çöl' ? 'desert' : (cfg.terrain === 'Tundra' || (winter && cfg.biome !== 1 && cfg.biome !== 3 && cfg.biome !== 7)) ? 'snow' : 'temperate';
+      TILE_RGB = PALETTES[climate];
+      const r = wr.next();
+      const weather = climate === 'snow' ? (r < 0.65 ? 'snow' : r < 0.8 ? 'fog' : 'clear') : climate === 'desert' ? (r < 0.15 ? 'dust' : 'clear') : (r < 0.22 ? 'rain' : r < 0.36 ? 'fog' : 'clear');
+      treeSprites = makeTreeSprites(climate);
       const map = genMap(seed, defSide, cfg.terrain, cfg.fort || 0);
       st = {
         cfg, resolve, seed,
@@ -373,8 +461,12 @@
         ai: { mode: playerIsAtt ? 'hold' : 'attack', t: 3 },
         defSide, fort: cfg.fort || 0,
         mods: playerIsAtt ? [cfg.attEff || {}, cfg.defEff || {}] : [cfg.defEff || {}, cfg.attEff || {}],
-        bannerT: 0,
+        bannerT: 0, climate, weather, snow: climate === 'snow',
+        fogOn: true, vis: new Uint8Array(N * N), seen: new Uint8Array(N * N), fogT: 0, wx: [],
       };
+      st.objAt = new Array(N * N).fill(null);
+      st.objects.forEach((o) => { if (o.deco) return; for (let y = o.y; y < o.y + o.d; y++) for (let x = o.x; x < o.x + o.w; x++) st.objAt[y * N + x] = o; });
+      for (let i = 0; i < 260; i++) st.wx.push({ x: Math.random(), y: Math.random(), z: Math.random(), s: 0.5 + Math.random() });
       const attN = cfg.attacker, defN = cfg.defender;
       const sideNation = playerIsAtt ? [attN, defN] : [defN, attN];
       st.sideNation = sideNation;
@@ -389,7 +481,11 @@
       const [px, py] = [isoX(map.P.x + 4, map.P.y - 4), isoY(map.P.x + 4, map.P.y - 4)];
       st.camX = px - viewW() / 2; st.camY = py - viewH() / 2;
       clampCam();
+      updateFog();
       setupUI();
+      const wname = { snow: 'Kar fırtınası', fog: 'Yoğun sis — görüş ve isabet düşük', rain: 'Yağmurlu', dust: 'Kum fırtınası', clear: '' }[weather];
+      if (wname) setTimeout(() => { if (st) banner(wname, 2.5); }, 3200);
+      if (weather === 'rain' || weather === 'snow' || weather === 'dust') LOL.audio.weather(weather);
       banner(playerIsAtt ? `${cfg.provinceName} kuşatması başladı!` : `${cfg.provinceName} savunması!`, 3);
     });
   };
@@ -407,9 +503,7 @@
     const fx = toward.x - at.x, fy = toward.y - at.y, fl = Math.hypot(fx, fy);
     pick.sort((a, b) => ((b.x - at.x) * fx + (b.y - at.y) * fy) / fl - ((a.x - at.x) * fx + (a.y - at.y) * fy) / fl);
     const order = [];
-    for (let i = 0; i < counts.tank; i++) order.push('tank');
-    for (let i = 0; i < counts.inf; i++) order.push('inf');
-    for (let i = 0; i < counts.art; i++) order.push('art');
+    ['heavy', 'tank', 'recon', 'at', 'inf', 'mg', 'art', 'rocket'].forEach((t) => { for (let i = 0; i < (counts[t] || 0); i++) order.push(t); });
     const ang = Math.atan2(fy, fx);
     order.forEach((type, i) => {
       const c = pick[i] || pick[pick.length - 1];
@@ -421,18 +515,19 @@
   function makeUnit(type, side, x, y, ang) {
     const e = (st.mods && st.mods[side]) || {};
     const T = Object.assign({}, UT[type]);
-    T.hp = Math.round(T.hp * (1 + (e[type + 'Hp'] || 0)));
-    T.dmg = T.dmg * (1 + (e[type + 'Dmg'] || 0));
-    T.speed = T.speed * (1 + (e[type + 'Speed'] || 0));
-    T.range = T.range * (1 + (e[type + 'Range'] || 0));
-    if (type === 'art') T.sight = Math.max(T.sight, T.range + 0.5);
-    T.rof = T.rof * (1 - (e[type + 'Rof'] || 0));
-    T.acc = e[type + 'Acc'] || 0;
+    const tc = LOL.config.techClass[type] || type;
+    T.hp = Math.round(T.hp * (1 + (e[tc + 'Hp'] || 0)));
+    T.dmg = T.dmg * (1 + (e[tc + 'Dmg'] || 0));
+    T.speed = T.speed * (1 + (e[tc + 'Speed'] || 0));
+    T.range = T.range * (1 + (e[tc + 'Range'] || 0));
+    if (tc === 'art') T.sight = Math.max(T.sight, T.range + 0.5);
+    T.rof = T.rof * (1 - (e[tc + 'Rof'] || 0));
+    T.acc = e[tc + 'Acc'] || 0;
     return {
       id: nextId++, type, side, x, y, hp: T.hp, maxHp: T.hp, T, angle: ang, turret: ang,
       path: null, order: { type: 'idle' }, guardX: x, guardY: y, cd: Math.random() * T.rof, target: null,
       scanT: Math.random() * 0.3, repathT: 0, stuckT: 0, stuckN: 0, lastX: x, lastY: y,
-      anim: Math.random() * 10, recoil: 0, moving: false, flashT: 0, hitT: 0, dead: false,
+      burstN: 0, anim: Math.random() * 10, recoil: 0, moving: false, flashT: 0, hitT: 0, dead: false, kills: 0, rank: 0, salvoLeft: 0, salvoT: 0, trackT: 0,
     };
   }
 
@@ -612,9 +707,9 @@
       const d = Math.hypot(e.x - u.x, e.y - u.y);
       if (d > r || d < (T.minRange || 0)) continue;
       let s = d;
-      if (u.type === 'tank' && e.type !== 'inf') s -= 1.5;
-      if (u.type === 'inf' && e.type === 'inf') s -= 1;
-      if (u.type === 'art' && e.type === 'art') s -= 2;
+      const wpn = MULT[T.weapon], ea = UT[e.type].armor;
+      s -= (wpn[ea] || 0.5) * 2;
+      if (st.fogOn && u.side === 1 && !st.vis[Math.floor(e.y) * N + Math.floor(e.x)] && false) s += 0;
       if (s < bs) { bs = s; best = e; }
     }
     return best;
@@ -630,7 +725,7 @@
       else u.target = o.target;
     } else if (u.scanT <= 0) {
       u.scanT = 0.3 + Math.random() * 0.1;
-      if (o.type === 'move') u.target = u.type === 'tank' ? nearestEnemy(u, T.range) : null;
+      if (o.type === 'move') u.target = T.turret ? nearestEnemy(u, T.range) : null;
       else u.target = nearestEnemy(u, T.sight);
     }
     if (u.target && u.target.dead) u.target = null;
@@ -668,18 +763,31 @@
     if (wantFire && u.target) {
       const ang = Math.atan2(u.target.y - u.y, u.target.x - u.x);
       let aligned;
-      if (u.type === 'tank') {
+      if (T.turret) {
         u.turret = U.turnToward(u.turret, ang, T.turretTurn * dt);
         aligned = Math.abs(U.angleDiff(u.turret, ang)) < 0.12;
       } else if (!u.path) {
         u.angle = U.turnToward(u.angle, ang, T.turn * dt);
         aligned = Math.abs(U.angleDiff(u.angle, ang)) < 0.15;
       }
-      if (aligned && u.cd <= 0) { fire(u, u.target); u.cd = T.rof * (0.9 + Math.random() * 0.2); }
-    } else if (u.type === 'tank') {
+      if (aligned && u.cd <= 0 && !u.salvoLeft) {
+        fire(u, u.target);
+        u.cd = T.rof * (0.9 + Math.random() * 0.2);
+        if (T.burst && ++u.burstN >= 9) { u.burstN = 0; u.cd = 1.3 + Math.random() * 0.5; }
+      }
+    } else if (T.turret) {
       u.turret = U.turnToward(u.turret, u.angle, T.turretTurn * dt * 0.5);
     }
 
+    // rocket salvo in progress
+    if (u.salvoLeft > 0) {
+      u.salvoT -= dt;
+      if (u.salvoT <= 0) {
+        u.salvoT = 0.17;
+        u.salvoLeft--;
+        launchRocket(u);
+      }
+    }
     // movement
     u.moving = false;
     if (u.path && u.path.length) {
@@ -691,7 +799,7 @@
       } else {
         const ang = Math.atan2(dy, dx);
         u.angle = U.turnToward(u.angle, ang, T.turn * dt);
-        if (u.type === 'inf' || Math.abs(U.angleDiff(u.angle, ang)) < 0.5) {
+        if (isFoot(u) || Math.abs(U.angleDiff(u.angle, ang)) < 0.5) {
           const tile = st.tiles[Math.floor(u.y) * N + Math.floor(u.x)];
           const tf = tile === T_FORD ? 0.6 : tile === T_ROAD ? 1.15 : 1;
           const step = Math.min(d, T.speed * tf * dt);
@@ -715,7 +823,11 @@
         } else u.stuckN = 0;
       }
     }
-    if (u.type === 'tank' && u.moving && Math.random() < dt * 3) {
+    if (!isFoot(u) && u.moving) {
+      u.trackT += T.speed * dt;
+      if (u.trackT > 0.22) { u.trackT = 0; trackMark(u); }
+    }
+    if (!isFoot(u) && u.moving && Math.random() < dt * 3) {
       const [bx, by] = [u.x - Math.cos(u.angle) * 0.45, u.y - Math.sin(u.angle) * 0.45];
       addP('dust', bx, by, 2, { vz: 4, life: 0.9, size: 3, grow: 6 });
     }
@@ -754,8 +866,11 @@
   }
 
   function muzzle(u) {
-    if (u.type === 'inf') { const a = u.angle; return { x: u.x + Math.cos(a) * 0.25, y: u.y + Math.sin(a) * 0.25, z: 10 }; }
+    if (isFoot(u)) { const a = u.angle; return { x: u.x + Math.cos(a) * 0.28, y: u.y + Math.sin(a) * 0.28, z: u.type === 'at' ? 12 : 10 }; }
+    if (u.type === 'recon') { const a = u.turret; return { x: u.x + Math.cos(a) * 0.4, y: u.y + Math.sin(a) * 0.4, z: 13 }; }
     if (u.type === 'tank') { const a = u.turret; return { x: u.x + Math.cos(a) * 0.62, y: u.y + Math.sin(a) * 0.62, z: 13 }; }
+    if (u.type === 'heavy') { const a = u.turret; return { x: u.x + Math.cos(a) * 0.82, y: u.y + Math.sin(a) * 0.82, z: 16 }; }
+    if (u.type === 'rocket') { const a = u.angle; return { x: u.x - Math.cos(a) * 0.1, y: u.y - Math.sin(a) * 0.1, z: 20 }; }
     const a = u.angle; return { x: u.x + Math.cos(a) * 0.8, y: u.y + Math.sin(a) * 0.8, z: 22 };
   }
   function snd(name, x, y) {
@@ -769,35 +884,69 @@
     return U.clamp(1.15 - d / 900, 0, 1);
   }
 
+  function vet(u) { return 1 + u.rank * 0.15; }
   function fire(u, t) {
     const T = u.T;
     const m = muzzle(u);
     const d = Math.hypot(t.x - u.x, t.y - u.y);
-    if (u.type === 'inf') {
-      const hit = Math.random() < 0.75;
-      const ex = t.x + (hit ? 0 : (Math.random() - 0.5) * 0.8), ey = t.y + (hit ? 0 : (Math.random() - 0.5) * 0.8);
-      st.tracers.push({ x1: m.x, y1: m.y, z1: m.z, x2: ex, y2: ey, z2: hit ? 7 : 0, life: 0.07 });
+    const w = T.weapon;
+    if (w === 'rifle' || w === 'mg') {
+      const acc = (w === 'mg' ? 0.55 : 0.75) * (st.weather === 'fog' ? 0.85 : 1);
+      const hit = Math.random() < acc;
+      const ex = t.x + (hit ? 0 : (Math.random() - 0.5) * 0.9), ey = t.y + (hit ? 0 : (Math.random() - 0.5) * 0.9);
+      st.tracers.push({ x1: m.x, y1: m.y, z1: m.z, x2: ex, y2: ey, z2: hit ? 7 : 0, life: w === 'mg' ? 0.05 : 0.07, mg: w === 'mg' });
       u.flashT = 0.06;
-      if (hit) damage(t, T.dmg * MULT.rifle[UT[t.type].armor], u);
+      if (hit) damage(t, T.dmg * MULT[w][UT[t.type].armor] * vet(u), u);
       else addP('dust', ex, ey, 0, { vz: 10, life: 0.4, size: 1.5, grow: 3 });
-      if (t.type !== 'inf' && hit) { addP('spark', t.x, t.y, 8, { n: 2 }); if (Math.random() < 0.3) snd('hit', t.x, t.y); }
-      snd('rifle', u.x, u.y);
-    } else if (u.type === 'tank') {
-      st.projectiles.push({ kind: 'shell', x: m.x, y: m.y, z: m.z, tx: t.x, ty: t.y, speed: 14, dmg: T.dmg, splash: T.splash, weapon: 'cannon', side: u.side, owner: u });
+      if (!isFoot(t) && hit) { addP('spark', t.x, t.y, 8, { n: 2 }); if (Math.random() < 0.3) snd('hit', t.x, t.y); }
+      snd(w === 'mg' ? 'mg' : 'rifle', u.x, u.y);
+    } else if (w === 'atr') {
+      st.projectiles.push({ kind: 'atr', x: m.x, y: m.y, z: m.z, tx: t.x + (Math.random() - 0.5) * 0.2, ty: t.y + (Math.random() - 0.5) * 0.2, speed: 9, dmg: T.dmg * vet(u), splash: 0.4, weapon: 'atr', side: u.side, owner: u });
+      addP('smoke', m.x - Math.cos(u.angle) * 0.3, m.y - Math.sin(u.angle) * 0.3, m.z, { life: 0.9, size: 3, grow: 8, alpha: 0.45 });
+      u.flashT = 0.1;
+      snd('bazooka', u.x, u.y);
+    } else if (w === 'cannon' || w === 'bigcannon') {
+      const big = w === 'bigcannon';
+      st.projectiles.push({ kind: 'shell', x: m.x, y: m.y, z: m.z, tx: t.x, ty: t.y, speed: big ? 15 : 14, dmg: T.dmg * vet(u), splash: T.splash, weapon: w, side: u.side, owner: u, big });
       u.recoil = 1;
-      addP('flash', m.x, m.y, m.z, { life: 0.08, size: 9 });
-      for (let k = 0; k < 3; k++) addP('smoke', m.x, m.y, m.z, { life: 0.9, size: 3, grow: 10, alpha: 0.35 });
+      addP('flash', m.x, m.y, m.z, { life: 0.08, size: big ? 13 : 9 });
+      for (let k = 0; k < (big ? 5 : 3); k++) addP('smoke', m.x, m.y, m.z, { life: 0.9, size: 3, grow: 10, alpha: 0.35 });
+      addP('dust', u.x, u.y, 0, { life: 0.6, size: big ? 8 : 5, grow: 12, n: 2, vx: (Math.random() - 0.5), vy: (Math.random() - 0.5) });
       snd('cannon', u.x, u.y);
+    } else if (w === 'rocket') {
+      u.salvoLeft = T.salvo; u.salvoT = 0; u.salvoTarget = { x: t.x, y: t.y };
+      snd('rocketfire', u.x, u.y);
     } else {
-      const scatter = (0.25 + 0.75 * (d / T.range)) * (1 - (T.acc || 0));
+      const scatter = (0.25 + 0.75 * (d / T.range)) * (1 - (T.acc || 0)) * (st.weather === 'fog' ? 1.3 : 1);
       const r = Math.random() * scatter, a = Math.random() * 6.283;
       const tx = t.x + Math.cos(a) * r, ty = t.y + Math.sin(a) * r;
       const dur = 0.8 + d * 0.11;
-      st.projectiles.push({ kind: 'arc', fx: m.x, fy: m.y, fz: m.z, tx, ty, t: 0, dur, peak: 50 + d * 9, dmg: T.dmg, splash: T.splash, weapon: 'shell', side: u.side, owner: u, x: m.x, y: m.y, z: m.z });
+      st.projectiles.push({ kind: 'arc', fx: m.x, fy: m.y, fz: m.z, tx, ty, t: 0, dur, peak: 50 + d * 9, dmg: T.dmg * vet(u), splash: T.splash, weapon: 'shell', side: u.side, owner: u, x: m.x, y: m.y, z: m.z });
       u.recoil = 1;
       addP('flash', m.x, m.y, m.z, { life: 0.12, size: 14 });
       for (let k = 0; k < 6; k++) addP('smoke', m.x, m.y, m.z, { life: 1.5, size: 4, grow: 14, alpha: 0.4, vx: (Math.random() - 0.5) * 0.6, vy: (Math.random() - 0.5) * 0.6 });
       snd('artfire', u.x, u.y);
+    }
+  }
+  function launchRocket(u) {
+    const T = u.T, m = muzzle(u), tg = u.salvoTarget || u;
+    const d = Math.hypot(tg.x - u.x, tg.y - u.y);
+    const scatter = (0.8 + 0.8 * d / T.range) * (1 - (T.acc || 0) * 0.5);
+    const r = Math.random() * scatter, a = Math.random() * 6.283;
+    const tx = tg.x + Math.cos(a) * r, ty = tg.y + Math.sin(a) * r;
+    st.projectiles.push({ kind: 'arc', rocket: true, fx: m.x, fy: m.y, fz: m.z, tx, ty, t: 0, dur: 0.9 + d * 0.07, peak: 40 + d * 5, dmg: T.dmg * vet(u), splash: T.splash, weapon: 'rocket', side: u.side, owner: u, x: m.x, y: m.y, z: m.z, whistled: true });
+    addP('flash', m.x, m.y, m.z, { life: 0.08, size: 8 });
+    for (let k = 0; k < 3; k++) addP('smoke', m.x, m.y, m.z, { life: 1.4, size: 3, grow: 12, alpha: 0.5, vx: (Math.random() - 0.5) * 0.5, vy: (Math.random() - 0.5) * 0.5 });
+    if (Math.random() < 0.5) snd('rocket', u.x, u.y);
+  }
+  function trackMark(u) {
+    const c = st.terrain.getContext('2d');
+    const ca = Math.cos(u.angle), sa = Math.sin(u.angle);
+    const w = UT[u.type].radius * 0.75;
+    c.fillStyle = st.snow ? 'rgba(120,120,130,0.22)' : 'rgba(40,30,20,0.16)';
+    for (const sgn of [-1, 1]) {
+      const x = u.x - sa * w * sgn, y = u.y + ca * w * sgn;
+      c.beginPath(); c.ellipse(isoX(x, y), isoY(x, y), 2.4, 1.3, 0, 0, 7); c.fill();
     }
   }
 
@@ -808,14 +957,25 @@
     t.hitT = 0.12;
     // being shot while idle: retaliate
     if (src && !src.dead && t.order.type === 'idle' && !t.target) { t.target = src; t.scanT = 1.2; }
-    if (t.hp <= 0) kill(t);
+    if (t.hp <= 0) {
+      kill(t);
+      if (src && !src.dead) {
+        src.kills++;
+        const nr = src.kills >= 8 ? 2 : src.kills >= 3 ? 1 : 0;
+        if (nr > src.rank) {
+          src.rank = nr; src.hp = Math.min(src.maxHp, src.hp + src.maxHp * 0.3);
+          addP('promo', src.x, src.y, 30, { life: 1.4, vz: 14 });
+          if (src.side === 0) banner(nr === 2 ? 'Birlik ELİT rütbeye yükseldi!' : 'Birlik tecrübe kazandı!', 1.2);
+        }
+      }
+    }
   }
 
   function kill(u) {
     u.dead = true;
     st.sel.delete(u);
-    if (u.type === 'inf') {
-      st.corpses.push({ type: 'inf', x: u.x, y: u.y, angle: u.angle, side: u.side, life: 10, max: 10 });
+    if (isFoot(u)) {
+      st.corpses.push({ type: 'inf', x: u.x, y: u.y, angle: u.angle, side: u.side, life: 12, max: 12 });
     } else {
       explosion(u.x, u.y, 1.2, true);
       st.corpses.push({ type: u.type, x: u.x, y: u.y, angle: u.angle, turret: u.turret + (Math.random() - 0.5), side: u.side, life: 40, max: 40, wreck: true });
@@ -843,7 +1003,32 @@
     c.restore();
   }
 
+  // terrain destruction: trees fall, houses crumble
+  function hitEnvironment(x, y, r, dmg) {
+    const x0 = Math.floor(x - r), x1 = Math.floor(x + r), y0 = Math.floor(y - r), y1 = Math.floor(y + r);
+    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
+      if (!inb(tx, ty)) continue;
+      const o = st.objAt[ty * N + tx];
+      if (!o || o.dead) continue;
+      if (Math.hypot(tx + 0.5 - x, ty + 0.5 - y) > r + 0.5) continue;
+      if (o.type === 'tree' && dmg > 40 && Math.random() < 0.55) {
+        o.dead = true; st.block[ty * N + tx] = 0; st.objAt[ty * N + tx] = null;
+        st.corpses.push({ type: 'stump', x: tx + 0.5, y: ty + 0.5, life: 1e9, max: 1e9, fall: Math.random() < 0.5 ? 1 : -1, t: 0, v: o.v });
+        for (let k = 0; k < 4; k++) addP('debris', tx + 0.5, ty + 0.5, 10, { vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2, vz: 30 + Math.random() * 40, life: 1, leaf: true });
+      } else if (o.type === 'house') {
+        o.hp = (o.hp == null ? 500 : o.hp) - dmg * 0.5;
+        if (o.hp <= 0 && !o.ruined) {
+          o.ruined = true; o.burning = 25;
+          for (let k = 0; k < 10; k++) addP('debris', o.x + o.w / 2, o.y + o.d / 2, 20, { vx: (Math.random() - 0.5) * 3, vy: (Math.random() - 0.5) * 3, vz: 30 + Math.random() * 60, life: 1.3 });
+          explosion(o.x + o.w / 2, o.y + o.d / 2, 0.8, true);
+        }
+      } else if (o.type === 'sandbag' && dmg > 60 && Math.random() < 0.25) {
+        o.dead = true; st.block[ty * N + tx] = 0; st.objAt[ty * N + tx] = null;
+      }
+    }
+  }
   function splash(x, y, p) {
+    if (p.dmg > 20) hitEnvironment(x, y, p.splash * 0.8, p.dmg);
     for (const e of st.units) {
       if (e.dead || e.side === p.side) continue;
       const d = Math.hypot(e.x - x, e.y - y);
@@ -855,12 +1040,13 @@
 
   function updateProjectiles(dt) {
     for (const p of st.projectiles) {
-      if (p.kind === 'shell') {
+      if (p.kind === 'shell' || p.kind === 'atr') {
         const dx = p.tx - p.x, dy = p.ty - p.y, d = Math.hypot(dx, dy);
         const step = p.speed * dt;
+        if (p.kind === 'atr') addP('smoke', p.x, p.y, p.z, { life: 0.7, size: 1.6, grow: 5, alpha: 0.45 });
         if (step >= d) {
           p.dead = true;
-          explosion(p.tx, p.ty, 0.45, false);
+          explosion(p.tx, p.ty, p.big ? 0.65 : p.kind === 'atr' ? 0.4 : 0.45, !!p.big);
           splash(p.tx, p.ty, p);
         } else {
           p.x += dx / d * step; p.y += dy / d * step;
@@ -876,10 +1062,11 @@
         const k = Math.min(1, p.t / p.dur);
         p.x = U.lerp(p.fx, p.tx, k); p.y = U.lerp(p.fy, p.ty, k);
         p.z = U.lerp(p.fz, 0, k) + 4 * p.peak * k * (1 - k);
-        if (Math.random() < 0.6) addP('smoke', p.x, p.y, p.z, { life: 0.5, size: 1.5, grow: 4, alpha: 0.3 });
+        if (p.rocket) { addP('smoke', p.x, p.y, p.z, { life: 1.1, size: 2, grow: 7, alpha: 0.45 }); addP('fire', p.x, p.y, p.z, { life: 0.12, vz: 0 }); }
+        else if (Math.random() < 0.6) addP('smoke', p.x, p.y, p.z, { life: 0.5, size: 1.5, grow: 4, alpha: 0.3 });
         if (k >= 1) {
           p.dead = true;
-          explosion(p.tx, p.ty, 0.9, true);
+          explosion(p.tx, p.ty, p.rocket ? 0.6 : 0.9, true);
           splash(p.tx, p.ty, p);
         }
       }
@@ -925,6 +1112,13 @@
       if (c.wreck && c.life > c.max * 0.7 && Math.random() < dt * 6) addP('fire', c.x, c.y, 8, { vz: 18, life: 0.4 });
     }
     st.corpses = st.corpses.filter((c) => c.life > 0);
+    for (const o of st.objects) {
+      if (o.burning > 0) {
+        o.burning -= dt;
+        if (Math.random() < dt * 6) addP('smoke', o.x + Math.random() * o.w, o.y + Math.random() * o.d, 18, { vz: 16, life: 2.6, size: 4, grow: 10, alpha: 0.5 });
+        if (Math.random() < dt * 8) addP('fire', o.x + Math.random() * o.w, o.y + Math.random() * o.d, 14, { vz: 20, life: 0.5 });
+      }
+    }
   }
 
   // ---------------- enemy AI ----------------
@@ -951,6 +1145,8 @@
 
   function step(dt) {
     st.time += dt;
+    st.fogT -= dt;
+    if (st.fogT <= 0) { st.fogT = 0.25; updateFog(); }
     for (const u of st.units) if (!u.dead) updateUnit(u, dt);
     separation();
     updateProjectiles(dt);
@@ -1005,71 +1201,145 @@
     return [[L / 2 + ox, W / 2], [L / 2 + ox, -W / 2], [-L / 2 + ox, -W / 2], [-L / 2 + ox, W / 2]].map(([a, b]) => [cx + a * c - b * s, cy + a * s + b * c]);
   }
 
-  function drawInf(u) {
-    const [sx, sy] = sp(u.x, u.y, 0);
-    const col = teamCol(u.side), dark = teamCol(u.side, -0.45);
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath(); ctx.ellipse(sx, sy, 5, 2.5, 0, 0, 7); ctx.fill();
-    const a = u.angle;
-    const fdx = (Math.cos(a) - Math.sin(a)), fdy = (Math.cos(a) + Math.sin(a)) / 2;
-    const fl = Math.hypot(fdx, fdy) || 1;
-    const fx = fdx / fl, fy = fdy / fl;
-    const walkA = u.moving ? Math.sin(u.anim * 6) * 2.2 : 0;
+  function soldier(sx, sy, u, col, dark, fx, fy, walkA, gun) {
     ctx.strokeStyle = '#2b2a20'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(sx - 1.5, sy - 6); ctx.lineTo(sx - 1.5 + walkA, sy - 0.5); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(sx + 1.5, sy - 6); ctx.lineTo(sx + 1.5 - walkA, sy - 0.5); ctx.stroke();
     ctx.fillStyle = u.hitT > 0 ? '#fff' : col;
     ctx.fillRect(sx - 3, sy - 13, 6, 7.5);
     ctx.fillStyle = dark; ctx.fillRect(sx - 3, sy - 8, 6, 1.5);
+    if (st.snow) { ctx.fillStyle = 'rgba(240,240,245,0.55)'; ctx.fillRect(sx - 3, sy - 13, 6, 2); }
     ctx.fillStyle = '#e2b892';
     ctx.beginPath(); ctx.arc(sx, sy - 15, 2.3, 0, 7); ctx.fill();
     ctx.fillStyle = dark;
     ctx.beginPath(); ctx.arc(sx, sy - 15.6, 2.6, Math.PI, 0); ctx.fill();
-    // rifle
-    ctx.strokeStyle = '#1b1b1b'; ctx.lineWidth = 1.6;
-    ctx.beginPath(); ctx.moveTo(sx + fx * 1, sy - 10 + fy * 1); ctx.lineTo(sx + fx * 9, sy - 10 + fy * 5); ctx.stroke();
-    if (u.flashT > 0) {
-      ctx.fillStyle = '#ffe680';
-      ctx.beginPath(); ctx.arc(sx + fx * 10, sy - 10 + fy * 5.5, 2.5, 0, 7); ctx.fill();
+    if (gun === 'at') {
+      ctx.strokeStyle = '#4a5636'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(sx - fx * 5, sy - 13 - fy * 2); ctx.lineTo(sx + fx * 8, sy - 13 + fy * 4); ctx.stroke();
+      ctx.fillStyle = '#5a4a30'; ctx.fillRect(sx - 4 - fx, sy - 12, 2.5, 4);
+      if (u.flashT > 0) { ctx.fillStyle = 'rgba(255,220,120,0.9)'; ctx.beginPath(); ctx.arc(sx - fx * 7, sy - 14 - fy * 2, 3, 0, 7); ctx.fill(); }
+    } else if (gun !== 'none') {
+      ctx.strokeStyle = '#1b1b1b'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(sx + fx * 1, sy - 10 + fy * 1); ctx.lineTo(sx + fx * 9, sy - 10 + fy * 5); ctx.stroke();
+      if (u.flashT > 0) { ctx.fillStyle = '#ffe680'; ctx.beginPath(); ctx.arc(sx + fx * 10, sy - 10 + fy * 5.5, 2.5, 0, 7); ctx.fill(); }
     }
   }
+  function drawInf(u) {
+    const [sx, sy] = sp(u.x, u.y, 0);
+    const col = teamCol(u.side), dark = teamCol(u.side, -0.45);
+    const a = u.angle;
+    const fdx = (Math.cos(a) - Math.sin(a)), fdy = (Math.cos(a) + Math.sin(a)) / 2;
+    const fl = Math.hypot(fdx, fdy) || 1;
+    const fx = fdx / fl, fy = fdy / fl;
+    const walkA = u.moving ? Math.sin(u.anim * 6) * 2.2 : 0;
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath(); ctx.ellipse(sx, sy, u.type === 'mg' ? 9 : 5, u.type === 'mg' ? 4 : 2.5, 0, 0, 7); ctx.fill();
+    if (u.type === 'mg') {
+      // two-man crew with a tripod machine gun
+      const px = -fy * 4, py = fx * 2;
+      soldier(sx - px, sy - py, u, col, dark, fx, fy, walkA, 'none');
+      const gx = sx + px + fx * 3, gy = sy + py + fy * 2;
+      ctx.strokeStyle = '#1b1b1b'; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(gx, gy - 4); ctx.lineTo(gx - 3, gy); ctx.moveTo(gx, gy - 4); ctx.lineTo(gx + 3, gy); ctx.stroke();
+      ctx.lineWidth = 2.6;
+      ctx.beginPath(); ctx.moveTo(gx - fx * 3, gy - 5 - fy * 1.5); ctx.lineTo(gx + fx * 9, gy - 5 + fy * 4); ctx.stroke();
+      ctx.fillStyle = '#4a4030'; ctx.fillRect(gx - 5, gy - 3, 3, 3);
+      soldier(sx + px - fx * 3, sy + py - fy * 2, u, col, dark, fx, fy, 0, 'none');
+      if (u.flashT > 0) { ctx.fillStyle = '#ffe680'; ctx.beginPath(); ctx.arc(gx + fx * 10, gy - 5 + fy * 4.5, 3, 0, 7); ctx.fill(); }
+      return;
+    }
+    soldier(sx, sy, u, col, dark, fx, fy, walkA, u.type === 'at' ? 'at' : 'rifle');
+  }
 
+  function wheels(u, L, Wd, n, h) {
+    const ca = Math.cos(u.angle), sa = Math.sin(u.angle);
+    ctx.fillStyle = '#151515';
+    for (let i = 0; i < n; i++) {
+      const t = (i / (n - 1) - 0.5) * L * 0.8;
+      for (const sgn of [-1, 1]) {
+        const x = u.x + ca * t - sa * Wd / 2 * sgn, y = u.y + sa * t + ca * Wd / 2 * sgn;
+        const [px, py] = sp(x, y, h || 3);
+        ctx.beginPath(); ctx.ellipse(px, py, 3.6, 3, 0, 0, 7); ctx.fill();
+      }
+    }
+  }
+  function barrel(u, ta, from, to, h0, h1, w) {
+    const b0 = sp(u.x + Math.cos(ta) * from, u.y + Math.sin(ta) * from, h0);
+    const b1 = sp(u.x + Math.cos(ta) * to, u.y + Math.sin(ta) * to, h1);
+    ctx.strokeStyle = '#1e1e1c'; ctx.lineWidth = w; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(b0[0], b0[1]); ctx.lineTo(b1[0], b1[1]); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(b0[0], b0[1] - 1); ctx.lineTo(b1[0], b1[1] - 1); ctx.stroke();
+    ctx.lineCap = 'butt';
+  }
   function drawVehicle(u, wreck) {
     const side = u.side;
     const base = wreck ? [45, 42, 38] : st.sideColor[side];
     const top = U.shade(base, wreck ? 0 : 0.05), sL = U.shade(base, -0.3), sR = U.shade(base, -0.15);
     const flash = !wreck && u.hitT > 0;
-    // shadow
-    const shadow = rect(u.x + 0.08, u.y + 0.08, u.angle, 1.05, 0.72).map(([x, y]) => sp(x, y, 0));
+    const hl = (f) => (flash ? U.shade(base, 0.45) : U.shade(base, f));
+    const sz = u.type === 'heavy' ? 1.25 : u.type === 'recon' ? 0.85 : 1;
+    const shadow = rect(u.x + 0.08, u.y + 0.08, u.angle, 1.05 * sz, 0.72 * sz).map(([x, y]) => sp(x, y, 0));
     poly(shadow); ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fill();
-    if (u.type === 'tank') {
-      prism(rect(u.x, u.y, u.angle, 0.98, 0.66), 0, 5, wreck ? '#2a2826' : '#3a3a36', '#222', '#2c2c2a', 'rgba(0,0,0,0.5)');
-      prism(rect(u.x, u.y, u.angle, 0.86, 0.5), 5, 10, flash ? U.shade(base, 0.45) : top, sL, sR, 'rgba(0,0,0,0.45)');
-      const ta = wreck ? u.turret : u.turret;
-      prism(rect(u.x, u.y, ta, 0.38, 0.34, -0.04), 10, 15, flash ? U.shade(base, 0.5) : U.shade(base, 0.12), sL, sR, 'rgba(0,0,0,0.5)');
-      const rl = 0.62 - (u.recoil || 0) * 0.12;
-      const b0 = sp(u.x + Math.cos(ta) * 0.14, u.y + Math.sin(ta) * 0.14, 12.5);
-      const b1 = sp(u.x + Math.cos(ta) * rl, u.y + Math.sin(ta) * rl, 12.5);
-      ctx.strokeStyle = '#1e1e1c'; ctx.lineWidth = 3.4; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(b0[0], b0[1]); ctx.lineTo(b1[0], b1[1]); ctx.stroke();
-      ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(b0[0], b0[1] - 1); ctx.lineTo(b1[0], b1[1] - 1); ctx.stroke();
-      ctx.lineCap = 'butt';
+    const ta = u.turret;
+    if (u.type === 'tank' || u.type === 'heavy') {
+      const k = sz;
+      prism(rect(u.x, u.y, u.angle, 0.98 * k, 0.66 * k), 0, 5 * k, wreck ? '#2a2826' : '#3a3a36', '#222', '#2c2c2a', 'rgba(0,0,0,0.5)');
+      prism(rect(u.x, u.y, u.angle, 0.86 * k, 0.5 * k), 5 * k, 10 * k, flash ? U.shade(base, 0.45) : top, sL, sR, 'rgba(0,0,0,0.45)');
+      if (u.type === 'heavy') prism(rect(u.x, u.y, u.angle, 0.3, 0.52 * k, 0.3), 10 * k, 11.5 * k, hl(-0.05), sL, sR);
+      prism(rect(u.x, u.y, ta, 0.4 * k, 0.36 * k, -0.04), 10 * k, 15 * k + (k > 1 ? 2 : 0), hl(0.12), sL, sR, 'rgba(0,0,0,0.5)');
+      const rl = (u.type === 'heavy' ? 0.95 : 0.62) - (u.recoil || 0) * 0.12;
+      barrel(u, ta, 0.14, rl, 12.5 * k + 1, 12.5 * k + 1, u.type === 'heavy' ? 4.6 : 3.4);
+      if (u.type === 'heavy') { const m = sp(u.x + Math.cos(ta) * rl, u.y + Math.sin(ta) * rl, 12.5 * k + 1); ctx.fillStyle = '#1e1e1c'; ctx.beginPath(); ctx.arc(m[0], m[1], 3, 0, 7); ctx.fill(); }
+    } else if (u.type === 'recon') {
+      wheels(u, 0.8, 0.58, 3, 2);
+      prism(rect(u.x, u.y, u.angle, 0.82, 0.5), 3, 10, flash ? U.shade(base, 0.45) : top, sL, sR, 'rgba(0,0,0,0.45)');
+      prism(rect(u.x, u.y, u.angle, 0.24, 0.48, 0.32), 3, 8, hl(-0.1), sL, sR);
+      prism(rect(u.x, u.y, ta, 0.26, 0.24, -0.06), 10, 14, hl(0.12), sL, sR, 'rgba(0,0,0,0.5)');
+      barrel(u, ta, 0.08, 0.42, 12.5, 12.5, 1.8);
+      if (u.flashT > 0) { const m = sp(u.x + Math.cos(ta) * 0.45, u.y + Math.sin(ta) * 0.45, 12.5); ctx.fillStyle = '#ffe680'; ctx.beginPath(); ctx.arc(m[0], m[1], 2.5, 0, 7); ctx.fill(); }
+    } else if (u.type === 'rocket') {
+      wheels(u, 0.9, 0.56, 3, 2);
+      prism(rect(u.x, u.y, u.angle, 0.92, 0.5), 3, 7, hl(-0.05), sL, sR, 'rgba(0,0,0,0.45)');
+      prism(rect(u.x, u.y, u.angle, 0.28, 0.5, 0.3), 7, 14, flash ? U.shade(base, 0.45) : top, sL, sR, 'rgba(0,0,0,0.45)');
+      // launcher rails, raised toward the rear
+      const ca = Math.cos(u.angle), sa = Math.sin(u.angle);
+      for (let k = -2; k <= 2; k++) {
+        const ox = -sa * k * 0.08, oy = ca * k * 0.08;
+        const a0 = sp(u.x - ca * 0.4 + ox, u.y - sa * 0.4 + oy, 9), a1 = sp(u.x + ca * 0.12 + ox, u.y + sa * 0.12 + oy, 20);
+        ctx.strokeStyle = '#3a3a30'; ctx.lineWidth = 2.4;
+        ctx.beginPath(); ctx.moveTo(a0[0], a0[1]); ctx.lineTo(a1[0], a1[1]); ctx.stroke();
+        if (!wreck && u.salvoLeft <= Math.abs(k) * 2 && u.cd > 2) continue;
+        ctx.strokeStyle = '#c8b888'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(a1[0] - (a1[0] - a0[0]) * 0.3, a1[1] - (a1[1] - a0[1]) * 0.3); ctx.lineTo(a1[0], a1[1]); ctx.stroke();
+      }
     } else {
       prism(rect(u.x, u.y, u.angle, 0.92, 0.6), 0, 5, '#333', '#222', '#2a2a2a', 'rgba(0,0,0,0.5)');
       prism(rect(u.x, u.y, u.angle, 0.82, 0.5), 5, 9, flash ? U.shade(base, 0.45) : top, sL, sR, 'rgba(0,0,0,0.45)');
-      prism(rect(u.x, u.y, u.angle, 0.36, 0.4, -0.18), 9, 16, flash ? U.shade(base, 0.5) : U.shade(base, 0.1), sL, sR, 'rgba(0,0,0,0.5)');
+      prism(rect(u.x, u.y, u.angle, 0.36, 0.4, -0.18), 9, 16, hl(0.1), sL, sR, 'rgba(0,0,0,0.5)');
       const a = u.angle;
       const rl = 0.85 - (u.recoil || 0) * 0.15;
-      const b0 = sp(u.x - Math.cos(a) * 0.05, u.y - Math.sin(a) * 0.05, 14);
-      const b1 = sp(u.x + Math.cos(a) * rl, u.y + Math.sin(a) * rl, wreck ? 12 : 24);
-      ctx.strokeStyle = '#1e1e1c'; ctx.lineWidth = 4; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(b0[0], b0[1]); ctx.lineTo(b1[0], b1[1]); ctx.stroke();
-      ctx.lineCap = 'butt';
+      barrel(u, a, -0.05, rl, 14, wreck ? 12 : 24, 4);
+    }
+    if (st.snow && !wreck) {
+      const c = rect(u.x, u.y, u.angle, 0.5 * sz, 0.3 * sz).map(([x, y]) => sp(x, y, 10 * sz));
+      poly(c); ctx.fillStyle = 'rgba(245,245,250,0.4)'; ctx.fill();
     }
   }
 
   function drawCorpse(c) {
+    if (c.type === 'stump') {
+      const [sx, sy] = sp(c.x, c.y, 0);
+      c.t = Math.min(1, (c.t || 0) + 0.03);
+      const rot = c.fall * Math.min(1.45, c.t * c.t * 1.6);
+      ctx.fillStyle = 'rgba(0,0,0,0.2)';
+      ctx.beginPath(); ctx.ellipse(sx + c.fall * 16 * c.t, sy + 2, 18 * c.t + 3, 4, 0, 0, 7); ctx.fill();
+      ctx.save(); ctx.translate(sx, sy - 2); ctx.rotate(rot); ctx.globalAlpha = 0.95;
+      ctx.drawImage(treeSprites[c.v % treeSprites.length], -24, -60);
+      ctx.restore();
+      ctx.fillStyle = '#5a3e22'; ctx.beginPath(); ctx.ellipse(sx, sy - 1, 3, 1.6, 0, 0, 7); ctx.fill();
+      return;
+    }
     const a = Math.min(1, c.life / 3);
     ctx.globalAlpha = a;
     if (c.type === 'inf') {
@@ -1085,6 +1355,26 @@
     ctx.globalAlpha = 1;
   }
 
+  function drawFence(o) {
+    ctx.strokeStyle = st.snow ? '#6a5a4a' : '#7a5a34'; ctx.lineWidth = 1.2;
+    const x0 = o.x, y0 = o.y, x1 = o.x + (o.dir ? 0 : 1), y1 = o.y + (o.dir ? 1 : 0);
+    for (const h of [3, 6]) { const a = sp(x0, y0, h), b = sp(x1, y1, h); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+    for (let k = 0; k <= 2; k++) { const t = k / 2; const a = sp(U.lerp(x0, x1, t), U.lerp(y0, y1, t), 0), b = sp(U.lerp(x0, x1, t), U.lerp(y0, y1, t), 8); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+  }
+  function drawPole(o) {
+    const [sx, sy] = sp(o.x + 0.5, o.y + 0.5, 0);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(sx, sy - 1, 10, 2);
+    ctx.strokeStyle = '#4a3420'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx, sy - 34); ctx.stroke();
+    ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(sx - 6, sy - 30); ctx.lineTo(sx + 6, sy - 30); ctx.stroke();
+    ctx.strokeStyle = 'rgba(20,20,20,0.35)'; ctx.lineWidth = 0.7;
+    ctx.beginPath(); ctx.moveTo(sx - 6, sy - 30); ctx.quadraticCurveTo(sx - 30, sy - 22, sx - 58, sy - 30); ctx.stroke();
+  }
+  function drawWreck(o) {
+    const fake = { x: o.x + 0.5, y: o.y + 0.5, angle: o.a, turret: o.a + 0.7, type: o.v ? 'tank' : 'recon', side: 0 };
+    drawVehicle(fake, true);
+    if (Math.random() < 0.04) addP('smoke', o.x + 0.5, o.y + 0.5, 8, { vz: 10, life: 2.5, size: 2, grow: 6, alpha: 0.3 });
+  }
   function drawTree(o) {
     const [sx, sy] = sp(o.x + 0.5, o.y + 0.5, 0);
     const spr = treeSprites[o.v % treeSprites.length];
@@ -1185,7 +1475,13 @@
       case 'spark':
         ctx.fillStyle = `rgba(255,230,140,${k})`; ctx.fillRect(sx - 1, sy - 1, 2, 2); break;
       case 'debris':
-        ctx.fillStyle = `rgba(35,30,25,${Math.min(1, k * 2)})`; ctx.fillRect(sx - 1.5, sy - 1.5, 3, 3); break;
+        ctx.fillStyle = p.leaf ? `rgba(50,90,40,${Math.min(1, k * 2)})` : `rgba(35,30,25,${Math.min(1, k * 2)})`; ctx.fillRect(sx - 1.5, sy - 1.5, 3, 3); break;
+      case 'promo':
+        ctx.globalAlpha = Math.min(1, k * 1.5);
+        ctx.strokeStyle = '#ffd860'; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(sx - 7, sy); ctx.lineTo(sx, sy - 6); ctx.lineTo(sx + 7, sy); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(sx - 7, sy + 5); ctx.lineTo(sx, sy - 1); ctx.lineTo(sx + 7, sy + 5); ctx.stroke();
+        ctx.globalAlpha = 1; break;
       case 'flash': {
         const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, p.size);
         g.addColorStop(0, `rgba(255,250,220,${k})`); g.addColorStop(1, 'rgba(255,200,80,0)');
@@ -1202,9 +1498,9 @@
   }
 
   function healthBar(u, sx, sy) {
-    const w = u.type === 'inf' ? 18 : 30;
+    const w = isFoot(u) ? 18 : 30;
     const f = U.clamp(u.hp / u.maxHp, 0, 1);
-    const segs = u.type === 'inf' ? 5 : 8;
+    const segs = isFoot(u) ? 5 : 8;
     const x = sx - w / 2, y = sy;
     ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(x - 1, y - 1, w + 2, 5);
     const col = f > 0.55 ? '#38d838' : f > 0.28 ? '#e8d030' : '#e83a2a';
@@ -1225,12 +1521,87 @@
     ctx.stroke();
   }
 
-  function render() {
+  // ---------------- fog of war ----------------
+  let fogCanvas = null;
+  function updateFog() {
+    const vis = st.vis, seen = st.seen;
+    vis.fill(0);
+    const fogF = st.weather === 'fog' ? 0.75 : st.weather === 'snow' || st.weather === 'dust' ? 0.88 : 1;
+    for (const u of st.units) {
+      if (u.dead || u.side !== 0) continue;
+      const r = u.T.sight * fogF + 0.5;
+      const x0 = Math.max(0, Math.floor(u.x - r)), x1 = Math.min(N - 1, Math.floor(u.x + r));
+      const y0 = Math.max(0, Math.floor(u.y - r)), y1 = Math.min(N - 1, Math.floor(u.y + r));
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        if ((x + 0.5 - u.x) ** 2 + (y + 0.5 - u.y) ** 2 <= r * r) { vis[y * N + x] = 1; seen[y * N + x] = 1; }
+      }
+    }
+    if (!fogCanvas) { fogCanvas = document.createElement('canvas'); fogCanvas.width = N + 2; fogCanvas.height = N + 2; }
+    const g = fogCanvas.getContext('2d');
+    const id = g.createImageData(N + 2, N + 2);
+    for (let y = -1; y <= N; y++) for (let x = -1; x <= N; x++) {
+      const o = ((y + 1) * (N + 2) + (x + 1)) * 4;
+      const xi = U.clamp(x, 0, N - 1), yi = U.clamp(y, 0, N - 1), i = yi * N + xi;
+      id.data[o] = 6; id.data[o + 1] = 8; id.data[o + 2] = 12;
+      id.data[o + 3] = vis[i] ? 0 : seen[i] ? 110 : 235;
+    }
+    g.putImageData(id, 0, 0);
+  }
+  const visibleU = (u) => u.side === 0 || !st.fogOn || st.vis[Math.floor(u.y) * N + Math.floor(u.x)];
+  const visibleXY = (x, y) => !st.fogOn || !!st.vis[U.clamp(Math.floor(y), 0, N - 1) * N + U.clamp(Math.floor(x), 0, N - 1)];
+
+  function drawWeather(vw, vh, dt) {
+    const w = st.weather;
+    if (w === 'clear') return;
+    if (w === 'fog') {
+      const t = st.time;
+      for (let k = 0; k < 3; k++) {
+        const gx = (Math.sin(t * 0.05 + k * 2) * 0.5 + 0.5) * vw, gy = (Math.cos(t * 0.04 + k) * 0.5 + 0.5) * vh;
+        const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, Math.max(vw, vh) * 0.6);
+        g.addColorStop(0, 'rgba(200,205,210,0.22)'); g.addColorStop(1, 'rgba(200,205,210,0.05)');
+        ctx.fillStyle = g; ctx.fillRect(0, 0, vw, vh);
+      }
+      return;
+    }
+    if (w === 'rain') { ctx.fillStyle = 'rgba(30,40,60,0.18)'; ctx.fillRect(0, 0, vw, vh); }
+    if (w === 'snow') { ctx.fillStyle = 'rgba(200,210,230,0.08)'; ctx.fillRect(0, 0, vw, vh); }
+    if (w === 'dust') { ctx.fillStyle = 'rgba(190,150,90,0.16)'; ctx.fillRect(0, 0, vw, vh); }
+    const spd = st.paused ? 0 : st.speed;
+    ctx.lineWidth = 1;
+    for (const p of st.wx) {
+      if (w === 'rain') {
+        p.y += dt * 1.6 * p.s * spd; p.x -= dt * 0.25 * spd;
+        if (p.y > 1) { p.y -= 1; p.x = Math.random(); } if (p.x < 0) p.x += 1;
+        const x = p.x * vw, y = p.y * vh;
+        ctx.strokeStyle = 'rgba(180,200,230,0.45)';
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 3, y + 12 * p.s); ctx.stroke();
+      } else if (w === 'snow') {
+        p.y += dt * 0.12 * p.s * spd; p.x += Math.sin(st.time * 1.3 + p.z * 10) * dt * 0.02 * spd;
+        if (p.y > 1) { p.y -= 1; p.x = Math.random(); } p.x = (p.x + 1) % 1;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.beginPath(); ctx.arc(p.x * vw, p.y * vh, 1 + p.s * 1.3, 0, 7); ctx.fill();
+      } else {
+        p.x += dt * 0.5 * p.s * spd; p.y += Math.sin(p.z * 9 + st.time) * dt * 0.02 * spd;
+        if (p.x > 1) { p.x -= 1; p.y = Math.random(); } p.y = (p.y + 1) % 1;
+        ctx.fillStyle = 'rgba(210,170,110,0.35)'; ctx.fillRect(p.x * vw, p.y * vh, 6 * p.s, 1.2);
+      }
+    }
+  }
+
+  function chevrons(u, x, y) {
+    if (!u.rank) return;
+    ctx.strokeStyle = '#ffd860'; ctx.lineWidth = 1.6;
+    for (let k = 0; k < u.rank; k++) {
+      const yy = y - k * 3.5;
+      ctx.beginPath(); ctx.moveTo(x - 4, yy); ctx.lineTo(x, yy - 3); ctx.lineTo(x + 4, yy); ctx.stroke();
+    }
+  }
+
+  function render(dt) {
     const vw = viewW(), vh = viewH();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#080a08';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    // terrain
     const tw = st.terrain.width, th = st.terrain.height;
     const sx0 = Math.max(0, st.camX), sy0 = Math.max(0, st.camY);
     const sx1 = Math.min(tw, st.camX + vw), sy1 = Math.min(th, st.camY + vh);
@@ -1240,8 +1611,6 @@
       const [a, b] = sp(x, y, 0);
       return a > -m && a < vw + m && b > -m && b < vh + m * 1.5;
     };
-
-    // ground layer: corpses (infantry), markers, selection circles
     for (const c of st.corpses) if (c.type === 'inf' && onScreen(c.x, c.y, 30)) drawCorpse(c);
     for (const m of st.markers) {
       const [mx, my] = sp(m.x, m.y, 0);
@@ -1253,23 +1622,23 @@
     }
     for (const u of st.sel) {
       const [x, y] = sp(u.x, u.y, 0);
-      const r = u.type === 'inf' ? 8 : 20;
+      const r = isFoot(u) ? (u.type === 'mg' ? 11 : 8) : u.type === 'heavy' ? 24 : 20;
       ctx.strokeStyle = 'rgba(120,255,120,0.75)'; ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.ellipse(x, y, r, r / 2, 0, 0, 7); ctx.stroke();
     }
 
-    // depth sorted sprites
     const list = [];
     for (const o of st.objects) {
+      if (o.dead) continue;
       const cx = o.x + o.w / 2, cy = o.y + o.d / 2;
       if (!onScreen(cx, cy, 120)) continue;
       list.push({ k: cx + cy, o });
     }
-    for (const c of st.corpses) if (c.wreck && onScreen(c.x, c.y, 40)) list.push({ k: c.x + c.y, c });
-    for (const u of st.units) if (onScreen(u.x, u.y, 40)) list.push({ k: u.x + u.y, u });
+    for (const c of st.corpses) if ((c.wreck || c.type === 'stump') && onScreen(c.x, c.y, 60)) list.push({ k: c.x + c.y, c });
+    for (const u of st.units) if (onScreen(u.x, u.y, 40) && visibleU(u)) list.push({ k: u.x + u.y, u });
     list.sort((a, b) => a.k - b.k);
     for (const it of list) {
-      if (it.u) { if (it.u.type === 'inf') drawInf(it.u); else drawVehicle(it.u, false); }
+      if (it.u) { if (isFoot(it.u)) drawInf(it.u); else drawVehicle(it.u, false); }
       else if (it.c) drawCorpse(it.c);
       else {
         const o = it.o;
@@ -1277,41 +1646,55 @@
         else if (o.type === 'house') drawHouse(o);
         else if (o.type === 'sandbag') drawSandbag(o);
         else if (o.type === 'bunker') drawBunker(o);
+        else if (o.type === 'fence') drawFence(o);
+        else if (o.type === 'pole') drawPole(o);
+        else if (o.type === 'wreck') drawWreck(o);
         else drawRock(o);
       }
     }
 
-    // projectiles
     for (const p of st.projectiles) {
+      if (!visibleXY(p.x, p.y) && p.kind !== 'arc') continue;
       const [x, y] = sp(p.x, p.y, p.z);
       const [gx, gy] = sp(p.x, p.y, 0);
       ctx.fillStyle = 'rgba(0,0,0,0.25)';
       ctx.beginPath(); ctx.ellipse(gx, gy, 2.5, 1.2, 0, 0, 7); ctx.fill();
+      if (p.rocket || p.kind === 'atr') { ctx.fillStyle = '#ffcf70'; ctx.beginPath(); ctx.arc(x, y, 2.4, 0, 7); ctx.fill(); continue; }
       ctx.fillStyle = p.kind === 'shell' ? '#ffe9a0' : '#2b2b2b';
       ctx.beginPath(); ctx.arc(x, y, p.kind === 'shell' ? 2 : 2.8, 0, 7); ctx.fill();
     }
-    // tracers
-    ctx.lineWidth = 1.4;
     for (const t of st.tracers) {
       const a = sp(t.x1, t.y1, t.z1), b = sp(t.x2, t.y2, t.z2);
-      ctx.strokeStyle = `rgba(255,240,150,${t.life / 0.07})`;
+      ctx.lineWidth = t.mg ? 1.1 : 1.4;
+      ctx.strokeStyle = t.mg ? `rgba(255,170,90,${t.life / 0.05})` : `rgba(255,240,150,${t.life / 0.07})`;
       ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
     }
     for (const p of st.particles) if (onScreen(p.x, p.y, 60)) drawParticle(p);
 
-    // overlays: health bars + brackets
+    // fog of war overlay (smoothly interpolated tile visibility, iso-projected)
+    if (st.fogOn && fogCanvas) {
+      ctx.save();
+      ctx.setTransform(TW / 2, TH / 2, -TW / 2, TH / 2, OX - st.camX, OY - st.camY);
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(fogCanvas, 0, 0, N + 2, N + 2, -1, -1, N + 2, N + 2);
+      ctx.restore();
+    }
+
     const hover = st.hover;
     for (const u of st.units) {
       const isSel = st.sel.has(u);
-      if (!isSel && u.hp >= u.maxHp && u !== hover) continue;
+      if (!visibleU(u)) continue;
+      if (!isSel && u.hp >= u.maxHp && u !== hover && !u.rank) continue;
       if (!onScreen(u.x, u.y, 30)) continue;
-      const h = u.type === 'inf' ? 20 : u.type === 'tank' ? 22 : 28;
+      const h = isFoot(u) ? 20 : u.type === 'heavy' ? 26 : u.type === 'recon' ? 18 : u.type === 'tank' ? 22 : 28;
       const [x, y] = sp(u.x, u.y, h);
-      if (isSel) brackets(x, y + h + 4, u.type === 'inf' ? 8 : 20, h + 6);
-      healthBar(u, x, y - 6);
+      if (isSel) brackets(x, y + h + 4, isFoot(u) ? (u.type === 'mg' ? 11 : 8) : 20, h + 6);
+      if (isSel || u.hp < u.maxHp || u === hover) healthBar(u, x, y - 6);
+      chevrons(u, x - (isFoot(u) ? 13 : 19), y - 1);
     }
 
-    // drag box
+    drawWeather(vw, vh, dt || 0.016);
+
     if (st.drag && st.drag.active) {
       const d = st.drag;
       ctx.strokeStyle = '#7dff7d'; ctx.lineWidth = 1;
@@ -1321,12 +1704,11 @@
     }
     if (st.paused) {
       ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, 0, vw, vh);
-      ctx.fillStyle = '#ffcf6a'; ctx.font = 'bold 30px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffcf6a'; ctx.font = '900 30px Cinzel, serif'; ctx.textAlign = 'center';
       ctx.fillText('DURAKLATILDI', vw / 2, vh / 2); ctx.textAlign = 'left';
     }
-    // vignette
     const g = ctx.createRadialGradient(vw / 2, vh / 2, Math.min(vw, vh) * 0.45, vw / 2, vh / 2, Math.max(vw, vh) * 0.75);
-    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.35)');
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.38)');
     ctx.fillStyle = g; ctx.fillRect(0, 0, vw, vh);
   }
 
@@ -1344,13 +1726,21 @@
     const sx = MW / st.terrain.width, sy = MH / st.terrain.height;
     miniCtx.drawImage(miniBase, 0, 0);
     for (const o of st.objects) {
-      if (o.type !== 'house') continue;
+      if (o.type !== 'house' || !st.seen[Math.floor(o.y) * N + Math.floor(o.x)]) continue;
       miniCtx.fillStyle = '#c8b890';
       miniCtx.fillRect(isoX(o.x + 1, o.y + 1) * sx - 1.5, isoY(o.x + 1, o.y + 1) * sy - 1, 3, 2);
     }
+    // unexplored areas dark on the minimap
+    if (fogCanvas) {
+      miniCtx.save();
+      miniCtx.setTransform(TW / 2 * sx, TH / 2 * sy, -TW / 2 * sx, TH / 2 * sy, OX * sx, OY * sy);
+      miniCtx.drawImage(fogCanvas, 0, 0, N + 2, N + 2, -1, -1, N + 2, N + 2);
+      miniCtx.restore();
+    }
     for (const u of st.units) {
+      if (!visibleU(u)) continue;
       miniCtx.fillStyle = U.rgbStr(st.sideColor[u.side].map((v) => Math.min(255, v + 40)));
-      const s = u.type === 'inf' ? 2 : 3;
+      const s = isFoot(u) ? 2 : 3;
       miniCtx.fillRect(isoX(u.x, u.y) * sx - s / 2, isoY(u.x, u.y) * sy - s / 2, s, s);
     }
     miniCtx.strokeStyle = '#fff'; miniCtx.lineWidth = 1;
@@ -1407,11 +1797,12 @@
     if (!sel.length) {
       box.innerHTML = '<div class="sel-title">Seçim yok</div><div style="color:#888">Birliklerini seçmek için tıkla ya da kutu çiz.</div>';
     } else {
-      const cnt = { inf: 0, tank: 0, art: 0 };
+      const cnt = U.zeroUnits();
       let hp = 0, mx = 0;
       sel.forEach((u) => { cnt[u.type]++; hp += u.hp; mx += u.maxHp; });
       box.innerHTML = `<div class="sel-title">${sel.length} birlik seçili</div>
-        <div class="sel-grid">${U.TYPES.map((t) => `<div class="cell${cnt[t] ? '' : ' dim'}"><img src="${LOL.ui.unitIcon(t, st.sideNation[0].color)}"><b>${cnt[t]}</b><small>${UT[t].name}</small></div>`).join('')}</div>
+        <div class="sel-grid">${U.TYPES.filter((t) => cnt[t]).map((t) => `<div class="cell"><img src="${LOL.ui.unitIcon(t, st.sideNation[0].color)}"><b>${cnt[t]}</b><small>${LOL.config.unitShort[t]}</small></div>`).join('')}</div>
+        ${sel.some((u) => u.rank) ? `<div style="color:#ffd860;font-size:11px;margin-top:4px">★ ${sel.filter((u) => u.rank).length} tecrübeli birlik</div>` : ''}
         <div class="hpbar"><div style="width:${hp / mx * 100}%"></div></div>`;
     }
     U.el('b-pause').classList.toggle('on', st.paused);
@@ -1425,9 +1816,10 @@
     let best = null, bd = 1e9;
     for (const u of st.units) {
       if (sideFilter != null && u.side !== sideFilter) continue;
+      if (!visibleU(u)) continue;
       const [x, y] = sp(u.x, u.y, 0);
-      const r = u.type === 'inf' ? 10 : 20;
-      const cy = y - (u.type === 'inf' ? 8 : 9);
+      const r = isFoot(u) ? 10 : 20;
+      const cy = y - (isFoot(u) ? 8 : 9);
       const d = (mx - x) ** 2 + (my - cy) ** 2;
       if (d < r * r && d < bd) { bd = d; best = u; }
     }
@@ -1435,8 +1827,8 @@
   }
   function domType(list) {
     const c = { inf: 0, tank: 0, art: 0 };
-    list.forEach((u) => { c[u.type] += u.type === 'inf' ? 1 : 2.5; });
-    return U.TYPES.reduce((a, t) => (c[t] > c[a] ? t : a), 'inf');
+    list.forEach((u) => { const k = LOL.config.techClass[u.type]; c[k] += isFoot(u) ? 1 : 2.5; });
+    return U.TYPES.filter((t) => c[t] != null).reduce((a, t) => (c[t] > c[a] ? t : a), 'inf');
   }
   function selectedList() { return [...st.sel].filter((u) => !u.dead); }
 
@@ -1610,7 +2002,7 @@
       if (n >= 8) st.acc = 0;
     }
     if (!st) return;
-    render();
+    render(dt);
     renderMinimap();
     updateUI(dt);
   };
@@ -1643,14 +2035,16 @@
     };
     const loss = (side) => {
       const o = s.orig[side], v = surv[side];
-      return U.TYPES.map((t) => `<td>${o[t] - v[t]} / ${o[t]}</td>`).join('');
+      const parts = U.TYPES.filter((t) => o[t] > 0).map((t) => `${LOL.config.unitShort[t]} <b>${o[t] - v[t]}</b>/${o[t]}`);
+      return `<td>${parts.join(' · ') || '—'}</td>`;
     };
     const title = outcome === 'win' ? 'ZAFER!' : outcome === 'retreat' ? 'GERİ ÇEKİLDİN' : 'YENİLGİ';
     LOL.audio.play(outcome === 'win' ? 'victory' : 'defeat');
     LOL.audio.ambience(false);
+    LOL.audio.weather(null);
     LOL.audio.music('strategy');
     const body = `<p style="text-align:center">${U.esc(s.cfg.provinceName)} muharebesi ${outcome === 'win' ? 'kazanıldı' : 'kaybedildi'}. Süre: ${Math.floor(s.time / 60)}:${String(Math.floor(s.time % 60)).padStart(2, '0')}</p>
-      <table><tr><th>Kayıplar</th><th>Piyade</th><th>Tank</th><th>Topçu</th></tr>
+      <table><tr><th>Taraf</th><th>Kayıplar (kayıp/toplam)</th></tr>
       <tr><td>${LOL.ui.flag(s.sideNation[0], 14)}${U.esc(s.sideName[0])}</td>${loss(0)}</tr>
       <tr><td>${LOL.ui.flag(s.sideNation[1], 14)}${U.esc(s.sideName[1])}</td>${loss(1)}</tr></table>`;
     setTimeout(() => {
