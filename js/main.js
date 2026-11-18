@@ -71,6 +71,10 @@
   window.addEventListener('mouseup', () => { miniDown = false; });
 
   // ---------------- menu ----------------
+  U.el('m-settings').onclick = () => { LOL.audio.init(); LOL.audio.play('click'); LOL.strategy.settings(); };
+  // start music on the first interaction (browsers block autoplay)
+  const firstGesture = () => { LOL.audio.init(); LOL.audio.music('strategy'); window.removeEventListener('pointerdown', firstGesture); };
+  window.addEventListener('pointerdown', firstGesture);
   U.el('m-new').onclick = () => {
     LOL.audio.init(); LOL.audio.play('click');
     app.mode = 'strategy';
@@ -86,6 +90,10 @@
   U.el('m-help').onclick = () => {
     LOL.audio.init(); LOL.audio.play('click');
     UI.modal('Nasıl Oynanır', `<div class="help">
+      <h3>Büyük Strateji</h3>
+      <p>Her tur bir aydır. <b>Hazine</b>, <b>İnsan Gücü</b>, <b>İstikrar</b> ve <b>Araştırma</b> ulusunun damarlarıdır. Bölgelerde <b>Fabrika</b>, <b>Tahkimat</b> ve <b>Kışla</b> inşa et; <b>Teknoloji</b> ekranından araştırma seç.</p>
+      <p><b>Diplomasi</b> ekranında hediye gönderip ilişkileri geliştirebilir, ittifak kurabilir, savaş ilan edebilir veya barış isteyebilirsin. Müttefikler savaşa birlikte girer. Rastgele <b>olaylar</b> kararlarını sınar; <b>Dünya Gazetesi</b> olup biteni anlatır.</p>
+      <p>Alttaki <b>harita modları</b> ile siyasi, diplomatik, ekonomik, arazi ve askerî görünümler arasında geçiş yap.</p>
       <h3>Strateji Haritası</h3>
       <p>Haritada bir ulus seç ve dünyayı fethetmeye başla. Her bölge her tur altın getirir; başkentin ekstra gelir sağlar.</p>
       <p><b>Sol tık</b>: bölge seç &middot; <b>Sürükle</b>: haritayı kaydır &middot; <b>Tekerlek</b>: yakınlaştır</p>

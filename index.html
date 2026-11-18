@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <title>Lands of Legacy</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -12,38 +14,65 @@
 <!-- ANA MENÜ -->
 <div id="menu" class="screen">
   <div class="menu-box">
+    <div class="menu-emblem"></div>
     <h1>LANDS <span>of</span> LEGACY</h1>
-    <p class="tagline">Haritayı fethet. Savaş alanında ordularını bizzat yönet.</p>
-    <button id="m-new" class="big">Yeni Oyun</button>
-    <button id="m-load" class="big">Devam Et</button>
-    <button id="m-help" class="big">Nasıl Oynanır</button>
-    <p class="ver">v1.0</p>
+    <p class="tagline">1936. Dünya bir savaşın eşiğinde. Ulusunu zafere taşı.</p>
+    <div class="menu-btns">
+      <button id="m-new" class="big primary">Yeni Kampanya</button>
+      <button id="m-load" class="big">Devam Et</button>
+      <button id="m-help" class="big">Nasıl Oynanır</button>
+      <button id="m-settings" class="big">Ayarlar</button>
+    </div>
+    <p class="ver">v2.0 · Büyük Strateji &amp; Gerçek Zamanlı Taktik</p>
   </div>
 </div>
 
 <!-- STRATEJİ ARAYÜZÜ -->
 <div id="strategy-ui" class="hidden">
   <div id="topbar">
-    <div class="nation-badge"><span id="tb-flag" class="flag"></span><span id="tb-name">-</span></div>
-    <div class="stat" title="Hazine">Altın <b id="tb-gold">0</b> <small id="tb-income"></small></div>
-    <div class="stat">Tur <b id="tb-turn">1</b></div>
-    <div class="stat" title="Bölge sayısı">Bölge <b id="tb-provs">0</b></div>
-    <div class="stat" title="Ordu gücü">Güç <b id="tb-power">0</b></div>
-    <div class="stat wars" id="tb-wars"></div>
+    <button class="tb-nation" id="tb-nation" title="Ulus yönetimi">
+      <img id="tb-flag" alt="">
+      <div class="tb-nation-txt"><div id="tb-name">-</div><div id="tb-gov"></div></div>
+    </button>
+    <div class="tb-res" id="tb-res"></div>
     <div class="spacer"></div>
-    <button id="btn-diplo">Diplomasi</button>
-    <button id="btn-save">Kaydet</button>
-    <button id="btn-sound">Ses: Açık</button>
-    <button id="btn-menu">Menü</button>
+    <div class="tb-date"><div id="tb-date"></div><div id="tb-wars"></div></div>
+    <div class="spacer"></div>
+    <div class="tb-actions">
+      <button class="tbtn" id="btn-diplo" title="Diplomasi"><span data-ico="handshake"></span><em>Diplomasi</em></button>
+      <button class="tbtn" id="btn-tech" title="Teknoloji"><span data-ico="sci"></span><em>Teknoloji</em></button>
+      <button class="tbtn" id="btn-save" title="Kaydet"><span data-ico="save"></span><em>Kaydet</em></button>
+      <button class="tbtn" id="btn-sound" title="Ses ayarları"><span data-ico="sound"></span><em>Ses</em></button>
+      <button class="tbtn" id="btn-menu" title="Ana menü"><span data-ico="menu"></span><em>Menü</em></button>
+    </div>
   </div>
+
   <div id="pick-banner" class="hidden">
-    <div>Haritadan yöneteceğin ulusu seç</div>
-    <button id="btn-newmap">Yeni Harita</button>
+    <div class="pb-title">Ulusunu Seç</div>
+    <div class="pb-sub">Haritada bir ülkeye tıkla. Her ulusun konumu, gücü ve komşuları farklıdır.</div>
+    <button id="btn-newmap">Yeni Dünya Oluştur</button>
   </div>
+
   <div id="prov-panel" class="panel hidden"></div>
-  <div id="log" class="panel"></div>
-  <button id="btn-endturn">Turu Bitir ▶</button>
-  <div id="busy" class="hidden">Diğer uluslar hamle yapıyor...</div>
+
+  <div id="news" class="panel">
+    <div class="news-head"><span data-ico="news"></span> DÜNYA GAZETESİ<button id="news-toggle" title="Daralt">–</button></div>
+    <div id="news-list"></div>
+  </div>
+
+  <div id="mapmodes" class="panel">
+    <button data-mode="political" class="on"><span data-ico="flag"></span>Siyasi</button>
+    <button data-mode="diplo"><span data-ico="handshake"></span>Diplomatik</button>
+    <button data-mode="economy"><span data-ico="coin"></span>Ekonomi</button>
+    <button data-mode="terrain"><span data-ico="tree"></span>Arazi</button>
+    <button data-mode="military"><span data-ico="army"></span>Askeri</button>
+  </div>
+
+  <div id="endturn-wrap">
+    <div id="endturn-info"></div>
+    <button id="btn-endturn"><span data-ico="next"></span><span id="endturn-label">Sonraki Ay</span></button>
+  </div>
+  <div id="busy" class="hidden"><div class="spinner"></div><span id="busy-text">Dünya hamle yapıyor...</span></div>
 </div>
 
 <!-- SAVAŞ ARAYÜZÜ -->
@@ -55,9 +84,9 @@
     </div>
     <div class="mini-wrap"><canvas id="minimap" width="212" height="112"></canvas></div>
     <div class="sb-forces">
-      <div class="f-row"><span class="flag" id="f-us"></span><span id="f-us-name"></span><b id="f-us-n"></b></div>
+      <div class="f-row"><img class="flagimg" id="f-us" alt=""><span id="f-us-name"></span><b id="f-us-n"></b></div>
       <div class="f-bar"><div id="f-bar-us"></div><div id="f-bar-them"></div></div>
-      <div class="f-row"><span class="flag" id="f-them"></span><span id="f-them-name"></span><b id="f-them-n"></b></div>
+      <div class="f-row"><img class="flagimg" id="f-them" alt=""><span id="f-them-name"></span><b id="f-them-n"></b></div>
     </div>
     <div id="sb-sel" class="sb-sel"></div>
     <div class="sb-btns">
@@ -80,6 +109,7 @@
 </div>
 
 <div id="tooltip" class="hidden"></div>
+<div id="toasts"></div>
 <div id="modal-root"></div>
 
 <script src="js/util.js"></script>

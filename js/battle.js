@@ -40,13 +40,14 @@
   // ======================================================================
   //  Map generation
   // ======================================================================
-  function genMap(seed, defSide) {
+  function genMap(seed, defSide, terrain, fort) {
+    const TR = { 'Ova': { tree: 0.68, rnd: 0.006, rock: 0.004, river: 0.4, lake: 0.28 }, 'Ormanlık': { tree: 0.5, rnd: 0.03, rock: 0.004, river: 0.4, lake: 0.26 }, 'Tepelik': { tree: 0.64, rnd: 0.01, rock: 0.03, river: 0.25, lake: 0.22 }, 'Kıyı': { tree: 0.7, rnd: 0.006, rock: 0.006, river: 0.9, lake: 0.36 } }[terrain] || { tree: 0.6, rnd: 0.012, rock: 0.006, river: 0.55, lake: 0.3 };
     const rng = U.rng(seed);
     const nz = U.noise(seed + 3), nz2 = U.noise(seed + 9), nz3 = U.noise(seed + 15);
     const tiles = new Uint8Array(N * N), block = new Uint8Array(N * N);
     const objAt = new Int16Array(N * N).fill(-1);
     const P = { x: 7, y: N - 8 }, E = { x: N - 8, y: 7 };
-    const river = rng.next() < 0.55;
+    const river = rng.next() < TR.river;
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       const m = nz.fbm(x / 9, y / 9, 3);
       let t = T_GRASS;
@@ -55,7 +56,7 @@
         const u = x - y, v = x + y;
         const mc = (nz2.fbm(v / 16, 3.3, 3) - 0.5) * 18;
         if (Math.abs(u - mc) < 1.7) t = T_WATER;
-      } else if (nz3.fbm(x / 8, y / 8, 3) < 0.3) t = T_WATER;
+      } else if (nz3.fbm(x / 8, y / 8, 3) < TR.lake) t = T_WATER;
       if (Math.hypot(x - P.x, y - P.y) < 7 || Math.hypot(x - E.x, y - E.y) < 7) { if (t === T_WATER) t = T_GRASS; }
       tiles[y * N + x] = t;
     }
@@ -137,6 +138,18 @@
         const x = Math.round(D.x + fx * 9 + px * k), y = Math.round(D.y + fy * 9 + py * k);
         if (freeTile(x, y, 4)) place({ type: 'sandbag', x, y, w: 1, d: 1 });
       }
+      for (let lv = 1; lv <= (fort || 0); lv++) {
+        const dist = 9 + lv * 2.5;
+        for (let k = -6; k <= 6; k++) {
+          if (Math.abs(k) % 3 === 0) continue;
+          const x = Math.round(D.x + fx * dist + px * k), y = Math.round(D.y + fy * dist + py * k);
+          if (freeTile(x, y, 4)) place({ type: 'sandbag', x, y, w: 1, d: 1 });
+        }
+        for (const k of [-4, 4]) {
+          const x = Math.round(D.x + fx * (dist - 1.5) + px * k), y = Math.round(D.y + fy * (dist - 1.5) + py * k);
+          if (freeTile(x, y, 4)) place({ type: 'bunker', x, y, w: 1, d: 1 });
+        }
+      }
     }
     // trees and rocks
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
@@ -144,8 +157,8 @@
       if (t !== T_GRASS && t !== T_DGRASS && t !== T_DIRT) continue;
       if (!freeTile(x, y, 6)) continue;
       const f = nz3.fbm(x / 5 + 50, y / 5 + 50, 3);
-      if ((f > 0.6 && rng.next() < 0.6) || rng.next() < 0.012) place({ type: 'tree', x, y, w: 1, d: 1, v: rng.int(0, 3) });
-      else if (rng.next() < 0.006) place({ type: 'rock', x, y, w: 1, d: 1, v: rng.next() });
+      if ((f > TR.tree && rng.next() < 0.6) || rng.next() < TR.rnd) place({ type: 'tree', x, y, w: 1, d: 1, v: rng.int(0, 3) });
+      else if (rng.next() < TR.rock) place({ type: 'rock', x, y, w: 1, d: 1, v: rng.next() });
     }
     for (let i = 0; i < N * N; i++) if (tiles[i] === T_WATER) block[i] = 1;
 
@@ -198,26 +211,55 @@
     const nz = U.noise(seed + 101);
     const w = N * TW + TW, h = N * TH + TH * 2;
     OX = w / 2; OY = TH;
-    const base = document.createElement('canvas'); base.width = w; base.height = h;
-    const b = base.getContext('2d');
+    // smooth terrain: bilinear blend of per-tile colours at quarter resolution + noise
+    const tcol = new Float32Array(N * N * 3);
+    const isWater = (x, y) => { x = U.clamp(x, 0, N - 1); y = U.clamp(y, 0, N - 1); return st.tiles[y * N + x] === T_WATER; };
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       const t = st.tiles[y * N + x];
-      const v = (nz.fbm(x / 4, y / 4, 3) - 0.5) * 34 + rng.range(-5, 5);
-      const c = TILE_RGB[t];
-      b.fillStyle = U.rgbStr([c[0] + v, c[1] + v, c[2] + v * 0.6]);
-      diamond(b, x, y, 0.8); b.fill();
+      const v = (nz.fbm(x / 4, y / 4, 3) - 0.5) * 30 + rng.range(-4, 4);
+      let c = TILE_RGB[t];
+      if (t === T_WATER) {
+        let deep = 0;
+        for (let k = -2; k <= 2; k++) for (let j = -2; j <= 2; j++) if (isWater(x + j, y + k)) deep++;
+        const f = deep / 25;
+        c = [U.lerp(70, 22, f), U.lerp(120, 62, f), U.lerp(140, 105, f)];
+      }
+      const i = (y * N + x) * 3;
+      tcol[i] = c[0] + v; tcol[i + 1] = c[1] + v; tcol[i + 2] = c[2] + v * 0.6;
     }
+    const sc = 4, bw = Math.ceil(w / sc), bh = Math.ceil(h / sc);
+    const base = document.createElement('canvas'); base.width = bw; base.height = bh;
+    const b = base.getContext('2d');
+    const id = b.createImageData(bw, bh);
+    const sm = (t) => t * t * (3 - 2 * t);
+    for (let py = 0; py < bh; py++) for (let px = 0; px < bw; px++) {
+      const wx = px * sc, wy = py * sc;
+      const a = (wx - OX) / (TW / 2), bb = (wy - OY) / (TH / 2);
+      const tx = (a + bb) / 2 - 0.5, ty = (bb - a) / 2 - 0.5;
+      const x0 = Math.floor(tx), y0 = Math.floor(ty);
+      const fx = sm(tx - x0), fy = sm(ty - y0);
+      const cx0 = U.clamp(x0, 0, N - 1), cx1 = U.clamp(x0 + 1, 0, N - 1), cy0 = U.clamp(y0, 0, N - 1), cy1 = U.clamp(y0 + 1, 0, N - 1);
+      const i00 = (cy0 * N + cx0) * 3, i10 = (cy0 * N + cx1) * 3, i01 = (cy1 * N + cx0) * 3, i11 = (cy1 * N + cx1) * 3;
+      const n = (nz.n2(wx / 22, wy / 11) - 0.5) * 16 + (nz.n2(wx / 6, wy / 3) - 0.5) * 8;
+      const o4 = (py * bw + px) * 4;
+      for (let k = 0; k < 3; k++) {
+        const top = tcol[i00 + k] + (tcol[i10 + k] - tcol[i00 + k]) * fx;
+        const bot = tcol[i01 + k] + (tcol[i11 + k] - tcol[i01 + k]) * fx;
+        id.data[o4 + k] = top + (bot - top) * fy + n * (k === 2 ? 0.6 : 1);
+      }
+      id.data[o4 + 3] = 255;
+    }
+    b.putImageData(id, 0, 0);
     const out = document.createElement('canvas'); out.width = w; out.height = h;
     const o = out.getContext('2d');
     o.fillStyle = '#0c0f0a'; o.fillRect(0, 0, w, h);
-    o.drawImage(base, 0, 0);
-    // soften tile edges: downscale + upscale blend (works everywhere)
-    const sm = document.createElement('canvas'); sm.width = Math.ceil(w / 10); sm.height = Math.ceil(h / 10);
-    const smc = sm.getContext('2d'); smc.imageSmoothingEnabled = true;
-    smc.drawImage(base, 0, 0, sm.width, sm.height);
-    o.imageSmoothingEnabled = true; o.globalAlpha = 0.55;
-    o.drawImage(sm, 0, 0, sm.width, sm.height, 0, 0, w, h);
-    o.globalAlpha = 1;
+    o.save();
+    o.beginPath();
+    o.moveTo(isoX(0, 0), isoY(0, 0)); o.lineTo(isoX(N, 0), isoY(N, 0)); o.lineTo(isoX(N, N), isoY(N, N)); o.lineTo(isoX(0, N), isoY(0, N)); o.closePath();
+    o.clip();
+    o.imageSmoothingEnabled = true;
+    o.drawImage(base, 0, 0, bw, bh, 0, 0, bw * sc, bh * sc);
+    o.restore();
     // clip to map diamond
     o.save();
     o.beginPath();
@@ -320,7 +362,7 @@
       const playerIsAtt = cfg.playerSide === 'attacker';
       const defSide = playerIsAtt ? 1 : 0;
       const seed = cfg.seed >>> 0;
-      const map = genMap(seed, defSide);
+      const map = genMap(seed, defSide, cfg.terrain, cfg.fort || 0);
       st = {
         cfg, resolve, seed,
         tiles: map.tiles, block: map.block, objects: map.objects, spawns: [map.P, map.E],
@@ -329,10 +371,13 @@
         ended: false, endTimer: -1, amoveMode: false, mouse: { x: 0, y: 0, inside: false }, drag: null, mdrag: null,
         keys: {}, lastClick: 0, sideColor: [], sideName: [], orig: [], bcount: [],
         ai: { mode: playerIsAtt ? 'hold' : 'attack', t: 3 },
+        defSide, fort: cfg.fort || 0,
+        mods: playerIsAtt ? [cfg.attEff || {}, cfg.defEff || {}] : [cfg.defEff || {}, cfg.attEff || {}],
         bannerT: 0,
       };
       const attN = cfg.attacker, defN = cfg.defender;
       const sideNation = playerIsAtt ? [attN, defN] : [defN, attN];
+      st.sideNation = sideNation;
       st.sideColor = sideNation.map((n) => U.hexToRgb(n.color));
       st.sideName = sideNation.map((n) => n.name);
       st.orig = playerIsAtt ? [cfg.attUnits, cfg.defUnits] : [cfg.defUnits, cfg.attUnits];
@@ -374,9 +419,17 @@
   }
 
   function makeUnit(type, side, x, y, ang) {
-    const T = UT[type];
+    const e = (st.mods && st.mods[side]) || {};
+    const T = Object.assign({}, UT[type]);
+    T.hp = Math.round(T.hp * (1 + (e[type + 'Hp'] || 0)));
+    T.dmg = T.dmg * (1 + (e[type + 'Dmg'] || 0));
+    T.speed = T.speed * (1 + (e[type + 'Speed'] || 0));
+    T.range = T.range * (1 + (e[type + 'Range'] || 0));
+    if (type === 'art') T.sight = Math.max(T.sight, T.range + 0.5);
+    T.rof = T.rof * (1 - (e[type + 'Rof'] || 0));
+    T.acc = e[type + 'Acc'] || 0;
     return {
-      id: nextId++, type, side, x, y, hp: T.hp, maxHp: T.hp, angle: ang, turret: ang,
+      id: nextId++, type, side, x, y, hp: T.hp, maxHp: T.hp, T, angle: ang, turret: ang,
       path: null, order: { type: 'idle' }, guardX: x, guardY: y, cd: Math.random() * T.rof, target: null,
       scanT: Math.random() * 0.3, repathT: 0, stuckT: 0, stuckN: 0, lastX: x, lastY: y,
       anim: Math.random() * 10, recoil: 0, moving: false, flashT: 0, hitT: 0, dead: false,
@@ -552,7 +605,7 @@
   const alive = (side) => st.units.filter((u) => !u.dead && (side == null || u.side === side));
 
   function nearestEnemy(u, r) {
-    const T = UT[u.type];
+    const T = u.T;
     let best = null, bs = 1e9;
     for (const e of st.units) {
       if (e.dead || e.side === u.side) continue;
@@ -568,7 +621,7 @@
   }
 
   function updateUnit(u, dt) {
-    const T = UT[u.type];
+    const T = u.T;
     u.cd -= dt; u.recoil = Math.max(0, u.recoil - dt * 3); u.flashT -= dt; u.hitT -= dt;
     u.scanT -= dt; u.repathT -= dt;
     const o = u.order;
@@ -705,6 +758,10 @@
     if (u.type === 'tank') { const a = u.turret; return { x: u.x + Math.cos(a) * 0.62, y: u.y + Math.sin(a) * 0.62, z: 13 }; }
     const a = u.angle; return { x: u.x + Math.cos(a) * 0.8, y: u.y + Math.sin(a) * 0.8, z: 22 };
   }
+  function snd(name, x, y) {
+    const [sx] = sp(x, y, 0);
+    LOL.audio.play(name, sndVol(x, y), U.clamp((sx - viewW() / 2) / (viewW() / 2), -1, 1) * 0.8);
+  }
   function sndVol(x, y) {
     const [sx, sy] = sp(x, y, 0);
     const cx = viewW() / 2, cy = viewH() / 2;
@@ -713,7 +770,7 @@
   }
 
   function fire(u, t) {
-    const T = UT[u.type];
+    const T = u.T;
     const m = muzzle(u);
     const d = Math.hypot(t.x - u.x, t.y - u.y);
     if (u.type === 'inf') {
@@ -723,16 +780,16 @@
       u.flashT = 0.06;
       if (hit) damage(t, T.dmg * MULT.rifle[UT[t.type].armor], u);
       else addP('dust', ex, ey, 0, { vz: 10, life: 0.4, size: 1.5, grow: 3 });
-      if (t.type !== 'inf' && hit) addP('spark', t.x, t.y, 8, { n: 2 });
-      LOL.audio.play('rifle', sndVol(u.x, u.y));
+      if (t.type !== 'inf' && hit) { addP('spark', t.x, t.y, 8, { n: 2 }); if (Math.random() < 0.3) snd('hit', t.x, t.y); }
+      snd('rifle', u.x, u.y);
     } else if (u.type === 'tank') {
       st.projectiles.push({ kind: 'shell', x: m.x, y: m.y, z: m.z, tx: t.x, ty: t.y, speed: 14, dmg: T.dmg, splash: T.splash, weapon: 'cannon', side: u.side, owner: u });
       u.recoil = 1;
       addP('flash', m.x, m.y, m.z, { life: 0.08, size: 9 });
       for (let k = 0; k < 3; k++) addP('smoke', m.x, m.y, m.z, { life: 0.9, size: 3, grow: 10, alpha: 0.35 });
-      LOL.audio.play('cannon', sndVol(u.x, u.y));
+      snd('cannon', u.x, u.y);
     } else {
-      const scatter = 0.25 + 0.75 * (d / T.range);
+      const scatter = (0.25 + 0.75 * (d / T.range)) * (1 - (T.acc || 0));
       const r = Math.random() * scatter, a = Math.random() * 6.283;
       const tx = t.x + Math.cos(a) * r, ty = t.y + Math.sin(a) * r;
       const dur = 0.8 + d * 0.11;
@@ -740,12 +797,13 @@
       u.recoil = 1;
       addP('flash', m.x, m.y, m.z, { life: 0.12, size: 14 });
       for (let k = 0; k < 6; k++) addP('smoke', m.x, m.y, m.z, { life: 1.5, size: 4, grow: 14, alpha: 0.4, vx: (Math.random() - 0.5) * 0.6, vy: (Math.random() - 0.5) * 0.6 });
-      LOL.audio.play('artfire', sndVol(u.x, u.y));
+      snd('artfire', u.x, u.y);
     }
   }
 
   function damage(t, amt, src) {
     if (t.dead) return;
+    if (t.side === st.defSide && st.fort) amt *= 1 - 0.08 * st.fort;
     t.hp -= amt;
     t.hitT = 0.12;
     // being shot while idle: retaliate
@@ -771,7 +829,7 @@
     for (let k = 0; k < 6 * scale; k++) addP('smoke', x + (Math.random() - 0.5) * 0.5, y + (Math.random() - 0.5) * 0.5, 6, { vz: 12 + Math.random() * 15, life: 1.8 + Math.random(), size: 6 * scale, grow: 14 * scale, alpha: 0.5 });
     for (let k = 0; k < 6 * scale; k++) addP('debris', x, y, 6, { vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4, vz: 40 + Math.random() * 80, life: 1.2 });
     scorch(x, y, 0.6 * scale);
-    LOL.audio.play(big ? 'boom' : 'small', sndVol(x, y));
+    snd(big ? 'boom' : 'small', x, y);
   }
   function scorch(x, y, r) {
     const c = st.terrain.getContext('2d');
@@ -810,6 +868,11 @@
         }
       } else {
         p.t += dt;
+        if (!p.whistled && p.dur - p.t < 1.4) {
+          p.whistled = true;
+          const [sx] = sp(p.tx, p.ty, 0);
+          LOL.audio.whistle(p.dur - p.t, sndVol(p.tx, p.ty) * 0.9, U.clamp((sx - viewW() / 2) / (viewW() / 2), -1, 1) * 0.8);
+        }
         const k = Math.min(1, p.t / p.dur);
         p.x = U.lerp(p.fx, p.tx, k); p.y = U.lerp(p.fy, p.ty, k);
         p.z = U.lerp(p.fz, 0, k) + 4 * p.peak * k * (1 - k);
@@ -1045,6 +1108,17 @@
       ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
     }
   }
+  function drawBunker(o) {
+    const c = [[o.x + 0.08, o.y + 0.08], [o.x + 0.92, o.y + 0.08], [o.x + 0.92, o.y + 0.92], [o.x + 0.08, o.y + 0.92]];
+    const sh = c.map(([x, y]) => sp(x + 0.15, y + 0.15, 0));
+    poly(sh); ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fill();
+    prism(c, 0, 14, '#8d8b84', '#5f5d57', '#7a7871', 'rgba(0,0,0,0.5)');
+    const c2 = [[o.x + 0.25, o.y + 0.25], [o.x + 0.75, o.y + 0.25], [o.x + 0.75, o.y + 0.75], [o.x + 0.25, o.y + 0.75]];
+    prism(c2, 14, 18, '#9a988f', '#6a6862', '#84827b', 'rgba(0,0,0,0.4)');
+    ctx.fillStyle = '#111';
+    poly([sp(o.x + 0.3, o.y + 0.92, 7), sp(o.x + 0.7, o.y + 0.92, 7), sp(o.x + 0.7, o.y + 0.92, 10), sp(o.x + 0.3, o.y + 0.92, 10)]); ctx.fill();
+    poly([sp(o.x + 0.92, o.y + 0.3, 7), sp(o.x + 0.92, o.y + 0.7, 7), sp(o.x + 0.92, o.y + 0.7, 10), sp(o.x + 0.92, o.y + 0.3, 10)]); ctx.fill();
+  }
   function drawHouse(o) {
     const x0 = o.x + 0.1, y0 = o.y + 0.1, x1 = o.x + o.w - 0.1, y1 = o.y + o.d - 0.1;
     const wallH = 24, ridgeH = o.ruined ? 24 : 40;
@@ -1202,6 +1276,7 @@
         if (o.type === 'tree') drawTree(o);
         else if (o.type === 'house') drawHouse(o);
         else if (o.type === 'sandbag') drawSandbag(o);
+        else if (o.type === 'bunker') drawBunker(o);
         else drawRock(o);
       }
     }
@@ -1303,8 +1378,10 @@
     const c = st.cfg;
     U.el('sb-title').textContent = c.playerSide === 'attacker' ? 'SALDIRI' : 'SAVUNMA';
     U.el('sb-sub').textContent = c.provinceName;
-    U.el('f-us').style.background = U.rgbStr(st.sideColor[0]);
-    U.el('f-them').style.background = U.rgbStr(st.sideColor[1]);
+    U.el('f-us').src = LOL.ui.flagURL(st.sideNation[0]);
+    U.el('f-them').src = LOL.ui.flagURL(st.sideNation[1]);
+    LOL.audio.music('battle');
+    LOL.audio.ambience(true);
     U.el('f-us-name').textContent = st.sideName[0];
     U.el('f-them-name').textContent = st.sideName[1];
     U.el('f-bar-us').style.background = U.rgbStr(st.sideColor[0]);
@@ -1334,7 +1411,7 @@
       let hp = 0, mx = 0;
       sel.forEach((u) => { cnt[u.type]++; hp += u.hp; mx += u.maxHp; });
       box.innerHTML = `<div class="sel-title">${sel.length} birlik seçili</div>
-        <div class="sel-grid">${U.TYPES.map((t) => `<div class="cell"><b>${cnt[t]}</b><small>${UT[t].name}</small></div>`).join('')}</div>
+        <div class="sel-grid">${U.TYPES.map((t) => `<div class="cell${cnt[t] ? '' : ' dim'}"><img src="${LOL.ui.unitIcon(t, st.sideNation[0].color)}"><b>${cnt[t]}</b><small>${UT[t].name}</small></div>`).join('')}</div>
         <div class="hpbar"><div style="width:${hp / mx * 100}%"></div></div>`;
     }
     U.el('b-pause').classList.toggle('on', st.paused);
@@ -1356,6 +1433,11 @@
     }
     return best;
   }
+  function domType(list) {
+    const c = { inf: 0, tank: 0, art: 0 };
+    list.forEach((u) => { c[u.type] += u.type === 'inf' ? 1 : 2.5; });
+    return U.TYPES.reduce((a, t) => (c[t] > c[a] ? t : a), 'inf');
+  }
   function selectedList() { return [...st.sel].filter((u) => !u.dead); }
 
   function commandAt(mx, my, forceAmove) {
@@ -1372,7 +1454,7 @@
       issueMove(sel, t.x, t.y, type);
       st.markers.push({ x: t.x, y: t.y, life: 0.6, max: 0.6, color: type === 'amove' ? '#ffb040' : '#60ff60' });
     }
-    LOL.audio.play('ack');
+    LOL.audio.say(enemy || forceAmove ? 'attack' : 'move', domType(sel));
   }
 
   function doButton(b) {
@@ -1437,7 +1519,7 @@
         });
         if (!e.shiftKey) st.sel = new Set();
         picked.forEach((u) => st.sel.add(u));
-        if (picked.length) LOL.audio.play('ack');
+        if (picked.length) LOL.audio.say('select', domType(picked));
       } else {
         const u = unitAt(mx, my);
         const now = performance.now();
@@ -1452,7 +1534,7 @@
             if (st.sel.has(u)) st.sel.delete(u); else st.sel.add(u);
           } else st.sel = new Set([u]);
           st.lastClick = now; st.lastClickUnit = u;
-          LOL.audio.play('click');
+          LOL.audio.say('select', u.type);
         } else if (u && u.side === 1 && st.sel.size) {
           commandAt(mx, my, false);
         } else if (!e.shiftKey) {
@@ -1495,7 +1577,7 @@
       const tx = ((wx - OX) / (TW / 2) + (wy - OY) / (TH / 2)) / 2;
       const ty = ((wy - OY) / (TH / 2) - (wx - OX) / (TW / 2)) / 2;
       issueMove(selectedList(), tx, ty, 'move');
-      LOL.audio.play('ack');
+      LOL.audio.say('move', domType(selectedList()));
       return;
     }
     st.camX = wx - viewW() / 2; st.camY = wy - viewH() / 2; clampCam();
@@ -1565,10 +1647,12 @@
     };
     const title = outcome === 'win' ? 'ZAFER!' : outcome === 'retreat' ? 'GERİ ÇEKİLDİN' : 'YENİLGİ';
     LOL.audio.play(outcome === 'win' ? 'victory' : 'defeat');
+    LOL.audio.ambience(false);
+    LOL.audio.music('strategy');
     const body = `<p style="text-align:center">${U.esc(s.cfg.provinceName)} muharebesi ${outcome === 'win' ? 'kazanıldı' : 'kaybedildi'}. Süre: ${Math.floor(s.time / 60)}:${String(Math.floor(s.time % 60)).padStart(2, '0')}</p>
       <table><tr><th>Kayıplar</th><th>Piyade</th><th>Tank</th><th>Topçu</th></tr>
-      <tr><td>${LOL.ui.flag(U.rgbStr(s.sideColor[0]))}${U.esc(s.sideName[0])}</td>${loss(0)}</tr>
-      <tr><td>${LOL.ui.flag(U.rgbStr(s.sideColor[1]))}${U.esc(s.sideName[1])}</td>${loss(1)}</tr></table>`;
+      <tr><td>${LOL.ui.flag(s.sideNation[0], 14)}${U.esc(s.sideName[0])}</td>${loss(0)}</tr>
+      <tr><td>${LOL.ui.flag(s.sideNation[1], 14)}${U.esc(s.sideName[1])}</td>${loss(1)}</tr></table>`;
     setTimeout(() => {
       LOL.ui.modal(title, body, [{ label: 'Haritaya Dön', value: 1, cls: 'primary' }], { cls: outcome === 'win' ? 'win' : 'lose' }).then(() => {
         st = null;

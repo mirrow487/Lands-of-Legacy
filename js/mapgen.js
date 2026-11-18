@@ -310,6 +310,27 @@
       p.ready = U.copyUnits(p.units);
     });
 
+    // terrain, population, outline pixels
+    const coastCnt = new Int32Array(P);
+    const borderLists = provinces.map(() => []);
+    for (let i = 0; i < N; i++) {
+      const p = pid[i];
+      if (p < 0) continue;
+      if (coast[i]) coastCnt[p]++;
+      if (coast[i] || nbPid[i] >= 0) borderLists[p].push(i);
+    }
+    const nzF = U.noise(seed + 71);
+    provinces.forEach((p) => {
+      p.borderPix = Int32Array.from(borderLists[p.id]);
+      p.coastal = coastCnt[p.id] > 25;
+      const h = nz.fbm(p.cx / 150, p.cy / 150, 5);
+      const f = nzF.fbm(p.cx / 90, p.cy / 90, 3);
+      p.terrain = h > 0.6 ? 'Tepelik' : f > 0.56 ? 'Ormanlık' : (p.coastal && rng.chance(0.55)) ? 'Kıyı' : 'Ova';
+      p.pop = Math.round(p.size / 45 * rng.range(0.7, 1.3) * (p.isCapital ? 1.6 : 1));
+      p.buildings = { fac: p.isCapital ? 1 : 0, fort: p.isCapital ? 1 : 0, bar: 0 };
+      p.queue = null;
+    });
+
     return { W, H, pid, provinces, links, seaDepth, shade, nbPid, coast, nations };
   }
 
