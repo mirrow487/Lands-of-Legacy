@@ -3,7 +3,8 @@
 Tarayıcıda çalışan bir büyük strateji + gerçek zamanlı taktik savaş oyunu.
 
 - **İki harita:** Gerçek dünya (1936, 165 ülke; istediğin ülkeyi seç) ya da Azgaar tarzı hayali dünya (yükselti, biyomlar, nehirler, dağ ve orman simgeleri).
-- **Danışman:** Her ay durumu değerlendirip öneri veren baş danışman. Claude API anahtarı eklenirse oyunun anlık durumunu görerek sorulara yanıt verir (anahtar yalnızca tarayıcıda saklanır).
+- **Sefer haritası (Bannerlord tarzı):** Zaman sürekli akar (duraklat / 1x / 2x / 4x). Garnizonlardan ordu kurulur; ordular bayraklarıyla haritada yürür, düşman bölgelerini kuşatır ve düşman ordularıyla meydan muharebesine girer. Yapay zekâ orduları da haritada dolaşır.
+- **Danışman:** Her ay durumu değerlendirip öneri veren baş danışman. Ayarlar > Yapay Zekâ bölümünden herkes kendi **Gemini** ya da **Claude** API anahtarını bağlarsa danışman oyunun anlık durumunu görerek sorulara yanıt verir (anahtar yalnızca o tarayıcıda saklanır).
 - **Büyük strateji:** Her oyunda yeniden üretilen dünya, 8 ulus (kendi bayrakları ve liderleriyle), aylık takvim (1936'dan başlar), hazine / insan gücü / istikrar / araştırma, binalar (fabrika, tahkimat, kışla), 15 teknoloji, ittifaklar ve ilişkiler, seçimli rastgele olaylar, Dünya Gazetesi haber akışı ve 5 harita modu.
 - **8 birlik türü:** Piyade, Makineli Tüfek, Tanksavar, Zırhlı Keşif, Tank, Ağır Tank, Topçu, Roket Topçusu.
 - **İzometrik savaş alanı:** Bir muharebe başladığında savaş alanına girip piyade, tank ve topçu birliklerini gerçek zamanlı olarak yönetirsin (sürükleyerek seçme, sağ tıkla hareket/saldırı, kontrol grupları, mini harita).
@@ -34,8 +35,10 @@ Sonra tarayıcıda `http://localhost:8000` adresine git.
 |---|---|
 | Sol tık | Bölge seç |
 | Sürükle / tekerlek | Haritayı kaydır / yakınlaştır |
-| Sağ tık (komşu bölge) | Seçili kuvveti gönder ya da saldır |
-| Enter | Turu bitir |
+| Sol tık (ordu) | Orduyu seç |
+| Sağ tık | Seçili orduyu oraya yürüt / düşman ordusunun peşine düş |
+| Boşluk / 1-2-3 | Zamanı duraklat / hız |
+| F | Seçili orduyu kamerayla izle |
 
 ### Savaş alanı
 | Girdi | Ne yapar |

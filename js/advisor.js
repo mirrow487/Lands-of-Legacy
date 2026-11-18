@@ -6,14 +6,24 @@
   // ======================================================================
   const U = LOL.util, UI = LOL.ui;
   const A = (LOL.advisor = {});
-  const KEY_STORE = 'lol_api_key';
   const SDK_URL = 'https://esm.sh/@anthropic-ai/sdk@1.4.0';
   const MODEL = 'claude-opus-5-5';
+  const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+  const GEMINI_FALLBACK = 'gemini-2.5-flash';
+  const PROVIDERS = { gemini: 'Google Gemini', claude: 'Anthropic Claude' };
   let open = false, chat = [], busy = false, tips = [];
   let portraitCache = {};
 
-  const getKey = () => { try { return localStorage.getItem(KEY_STORE) || ''; } catch (e) { return ''; } };
-  const setKey = (k) => { try { if (k) localStorage.setItem(KEY_STORE, k); else localStorage.removeItem(KEY_STORE); } catch (e) { /* ignore */ } };
+  const ls = {
+    get: (k) => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } },
+    set: (k, v) => { try { if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); } catch (e) { /* ignore */ } },
+  };
+  // migrate the old single Claude key
+  if (ls.get('lol_api_key') && !ls.get('lol_key_claude')) { ls.set('lol_key_claude', ls.get('lol_api_key')); ls.set('lol_api_key', ''); if (!ls.get('lol_ai_provider')) ls.set('lol_ai_provider', 'claude'); }
+  const provider = () => ls.get('lol_ai_provider') || 'gemini';
+  const keyFor = (p) => ls.get('lol_key_' + p);
+  const getKey = () => keyFor(provider());
+  const geminiModel = () => ls.get('lol_model_gemini') || GEMINI_FALLBACK;
 
   function portrait(color, seed) {
     const k = color + seed;
@@ -92,12 +102,12 @@
       <div class="adv-body">
         <div class="adv-sect">Raporum</div>
         ${tips.map((x, i) => `<div class="adv-tip${x.act ? ' click' : ''}" data-tip="${i}"><span class="adv-ico" style="background:${x.col}">${UI.icon(x.ico, 14)}</span><div>${x.text}</div></div>`).join('')}
-        <div class="adv-sect">Danışmana Sor ${hasKey ? '<span class="tag ally">Yapay Zekâ</span>' : ''}</div>
-        <div class="adv-chat" id="adv-chat">${chat.map((m) => `<div class="msg ${m.role}">${m.role === 'assistant' ? fmt(m.content) : U.esc(m.content)}</div>`).join('') || `<div class="hint" style="margin:0">${hasKey ? 'Strateji, diplomasi ya da savaş hakkında her şeyi sorabilirsin.' : 'Danışmanla serbestçe konuşmak için bir Claude API anahtarı ekle. Anahtar olmadan da yukarıdaki raporu her ay hazırlarım.'}</div>`}
+        <div class="adv-sect">Danışmana Sor ${hasKey ? `<span class="tag ally">${provider() === 'gemini' ? 'Gemini' : 'Claude'}</span>` : ''}</div>
+        <div class="adv-chat" id="adv-chat">${chat.map((m) => `<div class="msg ${m.role}">${m.role === 'assistant' ? fmt(m.content) : U.esc(m.content)}</div>`).join('') || `<div class="hint" style="margin:0">${hasKey ? 'Strateji, diplomasi ya da savaş hakkında her şeyi sorabilirsin.' : 'Danışmanla serbestçe konuşmak için kendi Gemini ya da Claude API anahtarını bağla. Anahtar olmadan da yukarıdaki raporu her ay hazırlarım.'}</div>`}
         ${busy ? '<div class="msg assistant typing"><span></span><span></span><span></span></div>' : ''}</div>
         ${hasKey ? `<form class="adv-input"><input id="adv-q" placeholder="Örn: Kime saldırmalıyım?" autocomplete="off" ${busy ? 'disabled' : ''}><button class="primary" ${busy ? 'disabled' : ''}>Sor</button></form>
-          <div class="adv-foot"><a href="#" data-adv="key">API anahtarını değiştir</a> · <a href="#" data-adv="clear">Sohbeti temizle</a></div>`
-          : `<button class="primary" data-adv="key" style="width:100%;margin-top:6px">Yapay Zekâ Danışmanı Etkinleştir</button>`}
+          <div class="adv-foot"><a href="#" data-adv="key">Yapay zekâ ayarları</a> · <a href="#" data-adv="clear">Sohbeti temizle</a></div>`
+          : `<button class="primary" data-adv="key" style="width:100%;margin-top:6px">Yapay Zekâ Bağla (Gemini / Claude)</button>`}
       </div>`;
     const ch = U.el('adv-chat'); if (ch) ch.scrollTop = ch.scrollHeight;
   }
@@ -105,32 +115,143 @@
     return U.esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
   }
 
-  async function keyDialog() {
-    const cur = getKey();
-    const v = await UI.modal('Yapay Zekâ Danışman', `<p>Danışman, Claude yapay zekâsı ile çalışır ve oyunun anlık durumunu görerek sorularını yanıtlar.</p>
-      <p class="hint">Anthropic Console'dan aldığın API anahtarını gir. Anahtar <b>sadece bu tarayıcıda</b> saklanır ve doğrudan Anthropic'e gönderilir. Her soru API hesabından küçük bir ücret düşer. Paylaşılan bir bilgisayarda kullanma.</p>
-      <input id="adv-key" type="password" placeholder="sk-ant-..." value="${U.esc(cur)}" style="width:100%;padding:9px;border-radius:6px;border:1px solid var(--line);background:#0a0f18;color:var(--text);font:inherit">`,
-    [{ label: 'İptal', value: null }, ...(cur ? [{ label: 'Anahtarı Sil', value: '', cls: 'danger' }] : []), { label: 'Kaydet', value: 'save', cls: 'primary' }], {
-      width: 520,
-      onMount: (wrap) => { const inp = wrap.querySelector('#adv-key'); A._keyInput = inp; setTimeout(() => inp.focus(), 50); },
-    });
-    if (v === null) return;
-    if (v === '') setKey('');
-    else setKey((A._keyInput.value || '').trim());
-    A.refresh();
+  async function listGeminiModels(key) {
+    const r = await fetch(`${GEMINI_BASE}/models?pageSize=200&key=${encodeURIComponent(key)}`);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw { status: r.status, message: (j.error && j.error.message) || r.statusText };
+    return (j.models || [])
+      .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent') && /gemini/i.test(m.name))
+      .map((m) => ({ id: m.name.replace(/^models\//, ''), name: m.displayName || m.name }));
+  }
+  function bestGemini(list) {
+    const ver = (id) => { const m = id.match(/gemini-(\d+(?:\.\d+)?)/); return m ? parseFloat(m[1]) : 0; };
+    const clean = list.filter((m) => /flash/.test(m.id) && !/lite|image|tts|audio|live|embed|exp|thinking|8b/.test(m.id));
+    const pool = clean.length ? clean : list;
+    pool.sort((a, b) => ver(b.id) - ver(a.id) || (/preview/.test(a.id) ? 1 : 0) - (/preview/.test(b.id) ? 1 : 0) || a.id.length - b.id.length);
+    return pool[0] ? pool[0].id : GEMINI_FALLBACK;
   }
 
-  // ---------------- Claude chat ----------------
+  // AI settings screen: everyone connects their own key
+  A.openSettings = async function () {
+    const prov = provider();
+    const body = `<p class="hint" style="margin-top:0">Danışmanla serbestçe konuşmak için <b>kendi</b> yapay zekâ API anahtarını bağla. Anahtar sadece bu tarayıcıda saklanır ve doğrudan seçtiğin sağlayıcıya gönderilir; oyun sunucusu yoktur. Paylaşılan bilgisayarlarda kullanma.</p>
+      <div class="ai-prov">${Object.keys(PROVIDERS).map((p) => `<label class="ai-card${p === prov ? ' on' : ''}"><input type="radio" name="aiprov" value="${p}" ${p === prov ? 'checked' : ''}><b>${PROVIDERS[p]}</b><small>${p === 'gemini' ? 'Google AI Studio anahtarı (AIza...)' : 'Anthropic Console anahtarı (sk-ant-...)'}</small><span class="ai-st">${keyFor(p) ? '● Bağlı' : '○ Anahtar yok'}</span></label>`).join('')}</div>
+      <div class="ai-field" data-for="gemini">
+        <label>Gemini API anahtarı</label>
+        <input id="ai-key-gemini" type="password" placeholder="AIza..." value="${U.esc(keyFor('gemini'))}" autocomplete="off">
+        <label>Model</label>
+        <div class="ai-row"><select id="ai-model"><option value="${U.esc(geminiModel())}">${U.esc(geminiModel())}</option></select><button id="ai-load">Modelleri Yükle</button></div>
+        <div class="hint">Anahtarı <b>aistudio.google.com</b> adresinden ücretsiz alabilirsin. "Modelleri Yükle" anahtarının erişebildiği modelleri listeler.</div>
+      </div>
+      <div class="ai-field" data-for="claude">
+        <label>Claude API anahtarı</label>
+        <input id="ai-key-claude" type="password" placeholder="sk-ant-..." value="${U.esc(keyFor('claude'))}" autocomplete="off">
+        <div class="hint">Anahtarı <b>console.anthropic.com</b> adresinden alabilirsin. Model: ${MODEL}. Her soru hesabından küçük bir ücret düşer.</div>
+      </div>
+      <div class="ai-row" style="margin-top:10px"><button id="ai-test">Bağlantıyı Dene</button><span id="ai-msg" class="hint" style="margin:0"></span></div>`;
+    let wrapEl = null;
+    const read = () => ({
+      prov: wrapEl.querySelector('input[name=aiprov]:checked').value,
+      gk: wrapEl.querySelector('#ai-key-gemini').value.trim(),
+      ck: wrapEl.querySelector('#ai-key-claude').value.trim(),
+      model: wrapEl.querySelector('#ai-model').value,
+    });
+    const v = await UI.modal('Yapay Zekâ Danışman Ayarları', body, [{ label: 'İptal', value: false }, { label: 'Kaydet', value: true, cls: 'primary' }], {
+      width: 600,
+      onMount: (wrap) => {
+        wrapEl = wrap;
+        const sync = () => {
+          const p = wrap.querySelector('input[name=aiprov]:checked').value;
+          wrap.querySelectorAll('.ai-card').forEach((c) => c.classList.toggle('on', c.querySelector('input').checked));
+          wrap.querySelectorAll('.ai-field').forEach((f2) => { f2.style.display = f2.dataset.for === p ? '' : 'none'; });
+        };
+        wrap.querySelectorAll('input[name=aiprov]').forEach((r) => { r.onchange = sync; });
+        sync();
+        const msg = wrap.querySelector('#ai-msg');
+        wrap.querySelector('#ai-load').onclick = async () => {
+          const k = wrap.querySelector('#ai-key-gemini').value.trim();
+          if (!k) { msg.textContent = 'Önce anahtarı gir.'; return; }
+          msg.textContent = 'Modeller yükleniyor...';
+          try {
+            const list = await listGeminiModels(k);
+            const best = bestGemini(list);
+            const sel = wrap.querySelector('#ai-model');
+            const cur = sel.value;
+            sel.innerHTML = list.map((m) => `<option value="${U.esc(m.id)}">${U.esc(m.id)}${m.id === best ? ' (önerilen)' : ''}</option>`).join('');
+            sel.value = list.some((m) => m.id === cur) && cur !== GEMINI_FALLBACK ? cur : best;
+            msg.textContent = `${list.length} model bulundu.`;
+          } catch (e) { msg.textContent = 'Hata: ' + errText(e); }
+        };
+        wrap.querySelector('#ai-test').onclick = async () => {
+          const r = read();
+          msg.textContent = 'Deneniyor...';
+          try {
+            const t = await callModel(r.prov, r.prov === 'gemini' ? r.gk : r.ck, r.model, 'Kısa yanıt ver.', [{ role: 'user', content: 'Sadece "Emrinizdeyim, efendim." de.' }], 200);
+            msg.innerHTML = '<span style="color:var(--good)">✔ Bağlantı çalışıyor:</span> ' + U.esc(t.slice(0, 80));
+          } catch (e) { msg.innerHTML = '<span style="color:var(--bad)">✖ ' + U.esc(errText(e)) + '</span>'; }
+        };
+      },
+    });
+    if (!v) return;
+    const r = read();
+    ls.set('lol_ai_provider', r.prov);
+    ls.set('lol_key_gemini', r.gk);
+    ls.set('lol_key_claude', r.ck);
+    if (r.model) ls.set('lol_model_gemini', r.model);
+    clientPromise = null;
+    UI.toast(getKey() ? `Danışman ${PROVIDERS[r.prov]} ile bağlandı.` : 'Yapay zekâ anahtarı kaldırıldı.', getKey() ? 'good' : '');
+    A.refresh();
+  };
+  function errText(e) {
+    if (!e) return 'Bilinmeyen hata';
+    if (e.status === 401 || e.status === 403) return 'API anahtarı geçersiz ya da yetkisiz.';
+    if (e.status === 429) return 'Kota/oran sınırı aşıldı, biraz bekle.';
+    if (e.status === 404) return 'Model bulunamadı — "Modelleri Yükle" ile başka model seç.';
+    return e.message || String(e);
+  }
+
+  // ---------------- model calls ----------------
   let clientPromise = null;
-  function client() {
+  function claudeClient(key) {
     if (!clientPromise) {
       const load = window.AnthropicSDK ? Promise.resolve({ default: window.AnthropicSDK }) : import(SDK_URL);
       clientPromise = load.then((mod) => {
         const Anthropic = mod.default || mod.Anthropic;
-        return new Anthropic({ apiKey: getKey(), dangerouslyAllowBrowser: true });
+        return new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
       });
     }
     return clientPromise;
+  }
+  async function callModel(prov, key, model, system, messages, maxTokens) {
+    if (!key) throw { message: 'Anahtar girilmedi.' };
+    if (prov === 'gemini') {
+      const body = {
+        systemInstruction: { parts: [{ text: system }] },
+        contents: messages.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
+        generationConfig: { maxOutputTokens: Math.max(1024, maxTokens || 4096), temperature: 0.8 },
+      };
+      const r = await fetch(`${GEMINI_BASE}/models/${encodeURIComponent(model || geminiModel())}:generateContent?key=${encodeURIComponent(key)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw { status: r.status, message: (j.error && j.error.message) || r.statusText };
+      if (j.promptFeedback && j.promptFeedback.blockReason) return 'Bu konuda size yardımcı olamam, efendim.';
+      const c = j.candidates && j.candidates[0];
+      const text = c && c.content && c.content.parts ? c.content.parts.map((p) => p.text || '').join('').trim() : '';
+      return text || 'Telsizde parazit var, efendim. Soruyu tekrar eder misiniz?';
+    }
+    const anthropic = await claudeClient(key);
+    const resp = await anthropic.beta.messages.create({
+      model: MODEL,
+      max_tokens: maxTokens || 4000,
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
+      output_config: { effort: 'low' },
+      system,
+      messages,
+    });
+    if (resp.stop_reason === 'refusal') return 'Bu konuda size yardımcı olamam, efendim.';
+    return resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim() || '...';
   }
 
   async function ask(q) {
@@ -139,34 +260,22 @@
     chat.push({ role: 'user', content: q });
     busy = true; render(st);
     try {
-      const anthropic = await client();
-      const system = `Sen "Lands of Legacy" adlı büyük strateji oyununda ${st.nationName} ulusunun baş danışmanı ${st.advisorName}'sın. Yıl ${st.date}.
+      const system = `Sen "Lands of Legacy" adlı büyük strateji oyununda ${st.nationName} ulusunun baş danışmanı ${st.advisorName}'sın. Tarih: ${st.date}.
 Oyuncuya "efendim" diye hitap eden, sadık, zeki ve biraz dramatik bir 1930'lar devlet adamı gibi konuş. Her zaman Türkçe yanıt ver.
-Yanıtların kısa olsun (en fazla 4-6 cümle ya da kısa bir madde listesi). Sadece verilen oyun durumuna dayan; somut bölge ve ülke adları ver.
-Oyun kuralları: her tur bir ay. Birlikler: Piyade, Makineli Tüfek, Tanksavar, Zırhlı Keşif, Tank, Ağır Tank, Topçu, Roket Topçusu. Binalar: Fabrika (+gelir, +araştırma), Tahkimat (savunma), Kışla (+insan gücü). Savaşlar istikrarı düşürür. Komşu bölgelere ordu gönderilerek saldırılır.`;
+Yanıtların kısa olsun (en fazla 4-6 cümle ya da kısa bir madde listesi). Sadece verilen oyun durumuna dayan; somut bölge, ordu ve ülke adları ver.
+Oyun kuralları: zaman sürekli akar (ay sonunda ekonomi işlenir). Bölgelerde garnizon tutulur; garnizondan "ordu" kurulur ve ordular haritada yürür, düşman bölgesine varınca kuşatma, düşman ordusuyla karşılaşınca meydan muharebesi olur.
+Birlikler: Piyade, Makineli Tüfek, Tanksavar, Zırhlı Keşif, Tank, Ağır Tank, Topçu, Roket Topçusu. Binalar: Fabrika (+gelir, +araştırma), Tahkimat (savunma), Kışla (+insan gücü). Savaşlar istikrarı düşürür.`;
       const state = JSON.stringify(st.forLLM);
       const messages = chat.slice(-10).map((m, i, arr) => ({
         role: m.role,
         content: i === arr.length - 1 && m.role === 'user' ? `Güncel oyun durumu (JSON):\n${state}\n\nSoru: ${m.content}` : m.content,
       }));
-      const resp = await anthropic.beta.messages.create({
-        model: MODEL,
-        max_tokens: 4000,
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
-        output_config: { effort: 'low' },
-        system,
-        messages,
-      });
-      let text;
-      if (resp.stop_reason === 'refusal') text = 'Bu konuda size yardımcı olamam, efendim.';
-      else text = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim() || '...';
+      const text = await callModel(provider(), getKey(), geminiModel(), system, messages, 4000);
       chat.push({ role: 'assistant', content: text });
       LOL.audio.play('radio');
     } catch (e) {
-      const msg = e && (e.status === 401 ? 'API anahtarı geçersiz görünüyor. Lütfen kontrol edin.' : e.status === 429 ? 'Çok fazla istek, biraz bekleyin.' : (e.message || String(e)));
-      chat.push({ role: 'assistant', content: 'Telsiz bağlantısı koptu, efendim. (' + msg + ')' });
-      if (e && e.status === 401) clientPromise = null;
+      chat.push({ role: 'assistant', content: 'Telsiz bağlantısı koptu, efendim. (' + errText(e) + ')' });
+      if (e && (e.status === 401 || e.status === 403)) clientPromise = null;
     }
     busy = false;
     render(LOL.strategy.analysis());
@@ -182,7 +291,7 @@ Oyun kuralları: her tur bir ay. Birlikler: Piyade, Makineli Tüfek, Tanksavar, 
         e.preventDefault();
         const k = a.dataset.adv;
         if (k === 'close') { open = false; A.refresh(); }
-        else if (k === 'key') { keyDialog(); clientPromise = null; }
+        else if (k === 'key') A.openSettings();
         else if (k === 'clear') { chat = []; A.refresh(); }
         return;
       }
@@ -200,7 +309,7 @@ Oyun kuralları: her tur bir ay. Birlikler: Piyade, Makineli Tüfek, Tanksavar, 
       e.preventDefault();
       const inp = U.el('adv-q');
       const q = inp && inp.value.trim();
-      if (q && !busy) { clientPromise = clientPromise || null; ask(q); }
+      if (q && !busy) ask(q);
     });
   };
   A.reset = () => { chat = []; open = false; };

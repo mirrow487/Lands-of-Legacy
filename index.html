@@ -42,7 +42,7 @@
       <button class="tbtn" id="btn-diplo" title="Diplomasi"><span data-ico="handshake"></span><em>Diplomasi</em></button>
       <button class="tbtn" id="btn-tech" title="Teknoloji"><span data-ico="sci"></span><em>Teknoloji</em></button>
       <button class="tbtn" id="btn-save" title="Kaydet"><span data-ico="save"></span><em>Kaydet</em></button>
-      <button class="tbtn" id="btn-sound" title="Ses ayarları"><span data-ico="sound"></span><em>Ses</em></button>
+      <button class="tbtn" id="btn-sound" title="Ses ve yapay zekâ ayarları"><span data-ico="sound"></span><em>Ayarlar</em></button>
       <button class="tbtn" id="btn-menu" title="Ana menü"><span data-ico="menu"></span><em>Menü</em></button>
     </div>
   </div>
@@ -74,7 +74,15 @@
 
   <div id="endturn-wrap">
     <div id="endturn-info"></div>
-    <button id="btn-endturn"><span data-ico="next"></span><span id="endturn-label">Sonraki Ay</span></button>
+    <div id="timectrl">
+      <div class="tc-date"><div id="tc-date"></div><div class="tc-bar"><i id="tc-prog"></i></div></div>
+      <div class="tc-btns">
+        <button data-spd="0" title="Duraklat (Boşluk)">❚❚</button>
+        <button data-spd="1" title="Normal hız (1)">▶</button>
+        <button data-spd="2" title="Hızlı (2)">▶▶</button>
+        <button data-spd="4" title="Çok hızlı (3)">▶▶▶</button>
+      </div>
+    </div>
   </div>
   <div id="advisor" class="advisor collapsed hidden"></div>
   <div id="busy" class="hidden"><div class="spinner"></div><span id="busy-text">Dünya hamle yapıyor...</span></div>
@@ -125,6 +133,7 @@
 <script src="js/mapgen.js"></script>
 <script src="js/battle.js"></script>
 <script src="js/strategy.js"></script>
+<script src="js/campaign.js"></script>
 <script src="js/vendor-anthropic.js"></script>
 <script src="js/advisor.js"></script>
 <script src="js/main.js"></script>

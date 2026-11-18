@@ -94,11 +94,13 @@
       <p>Her tur bir aydır. <b>Hazine</b>, <b>İnsan Gücü</b>, <b>İstikrar</b> ve <b>Araştırma</b> ulusunun damarlarıdır. Bölgelerde <b>Fabrika</b>, <b>Tahkimat</b> ve <b>Kışla</b> inşa et; <b>Teknoloji</b> ekranından araştırma seç.</p>
       <p><b>Diplomasi</b> ekranında hediye gönderip ilişkileri geliştirebilir, ittifak kurabilir, savaş ilan edebilir veya barış isteyebilirsin. Müttefikler savaşa birlikte girer. Rastgele <b>olaylar</b> kararlarını sınar; <b>Dünya Gazetesi</b> olup biteni anlatır.</p>
       <p>Alttaki <b>harita modları</b> ile siyasi, diplomatik, ekonomik, arazi ve askerî görünümler arasında geçiş yap.</p>
+      <h3>Sefer Haritası (Bannerlord tarzı)</h3>
+      <p>Zaman sürekli akar; sağ alttan duraklat ya da hızlandır (<b>Boşluk</b>, <b>1-2-3</b>). Bir bölgeni seçip <b>Ordu</b> sekmesinden <b>Ordu Kur</b>: ordun bayrağıyla haritada belirir. Orduya tıklayıp seç, haritada istediğin yere <b>sağ tıkla</b>. Düşman bölgesine varırsa kuşatma, düşman ordusuyla karşılaşırsa meydan muharebesi başlar. Düşman ordusuna sağ tıklarsan peşine düşer. <b>F</b>: kamerayla ordunu izle.</p>
       <h3>Strateji Haritası</h3>
       <p>Haritada bir ulus seç ve dünyayı fethetmeye başla. Her bölge her tur altın getirir; başkentin ekstra gelir sağlar.</p>
       <p><b>Sol tık</b>: bölge seç &middot; <b>Sürükle</b>: haritayı kaydır &middot; <b>Tekerlek</b>: yakınlaştır</p>
-      <p>Kendi bölgeni seçip <b>Asker Topla</b> ile piyade, tank ve topçu üret. Kaydırıcılarla göndereceğin kuvveti seç ve komşu bölgeye <b>sağ tıkla</b>.</p>
-      <p>Barışta olduğun bir ulusa saldırmak için önce savaş ilan etmelisin. Birlikler her tur bir kez hareket edebilir. Kesikli çizgiler deniz yollarıdır.</p>
+      <p>Kendi bölgeni seçip <b>Asker Topla</b> ile birlik üret; bunlar bölgenin garnizonu olur. Kaydırıcılarla seçtiğin birliklerden ordu kur.</p>
+      <p>Barışta olduğun bir ulusun topraklarına girmek için önce savaş ilan etmelisin. Kesikli çizgiler deniz yollarıdır; ordular bunları kullanarak adalara geçebilir.</p>
       <h3>Savaş Alanı (İzometrik)</h3>
       <p>Bir muharebe başladığında <b>Savaşı Yönet</b> seçeneğiyle savaş alanına girersin. Ya da sonucu <b>Otomatik Çöz</b>.</p>
       <p><b>Sol tık / sürükle</b>: birlik seç &middot; <b>Sağ tık</b>: hareket et / saldır &middot; <b>Ctrl+Sağ tık</b> veya <b>A</b>: saldırı hareketi (yolda düşmanla çatışır)</p>
@@ -117,6 +119,7 @@
   LOL.strategy.init();
   LOL.strategy.bindUI();
   LOL.advisor.bind();
+  LOL.campaign.bind();
   resize();
   LOL.strategy.newMap((Math.random() * 1e9) >>> 0, 'world');
   app.toMenu();

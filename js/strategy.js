@@ -83,7 +83,7 @@
     return 1 + 0.6 * (e[t + 'Dmg'] || 0) + 0.6 * (e[t + 'Hp'] || 0) + 0.3 * (e[t + 'Range'] || 0) + 0.2 * (e[t + 'Speed'] || 0) + 0.3 * (e[t + 'Acc'] || 0) + 0.3 * (e[t + 'Rof'] || 0);
   }
   const powerOf = (u, nid) => U.TYPES.reduce((s, t) => s + u[t] * C.power[t] * (nid == null ? 1 : typeMult(nid, t)), 0);
-  const nationPower = (nid) => provsOf(nid).reduce((s, p) => s + powerOf(p.units, nid), 0);
+  const nationPower = (nid) => provsOf(nid).reduce((s, p) => s + powerOf(p.units, nid), 0) + (G.armies || []).reduce((s, a) => s + (a.owner === nid ? powerOf(a.units, nid) : 0), 0);
   const defBonus = (p) => 1.2 + (p.isCapital ? 0.2 : 0) + p.buildings.fort * 0.15 * (1 + (eff(p.owner).fort || 0));
   function neighborNations(nid) {
     const s = new Set();
@@ -102,6 +102,7 @@
       mp += p.pop * 3 * (1 + p.buildings.bar * 0.3);
       U.TYPES.forEach((t) => { up += p.units[t] * C.upkeep[t]; });
     });
+    (G.armies || []).forEach((a) => { if (a.owner === nid) U.TYPES.forEach((t) => { up += a.units[t] * C.upkeep[t] * 1.2; }); });
     const stabM = 0.7 + 0.6 * n.stability / 100;
     inc *= (1 + (e.income || 0)) * stabM;
     mp *= (1 + (e.manpower || 0)) * (0.6 + 0.8 * n.stability / 100);
@@ -114,9 +115,10 @@
 
   S.newMap = function (seed, kind) {
     map = kind === 'world' ? LOL.mapgen.generateWorld(seed) : LOL.mapgen.generate(seed, 8);
+    if (LOL.campaign) LOL.campaign.reset();
     S.mapKind = map.kind;
     const rng = U.rng(seed + 5);
-    G = { seed, kind: map.kind, turn: 1, playerId: -1, nations: map.nations, provinces: map.provinces, wars: new Set(), allies: new Set(), truce: {}, rel: {}, news: [], eventsSeen: {} };
+    G = { seed, kind: map.kind, turn: 1, day: 0, armies: [], nextArmyId: 1, playerId: -1, nations: map.nations, provinces: map.provinces, wars: new Set(), allies: new Set(), truce: {}, rel: {}, news: [], eventsSeen: {} };
     G.nations.forEach((n) => {
       const gov = rng.pick(GOVS);
       n.advisor = rng.pick(['Orgeneral', 'Mareşal', 'Amiral', 'Kurmay Albay']) + ' ' + rng.pick(FIRST) + ' ' + rng.pick(LAST);
@@ -140,7 +142,6 @@
     const playing = p === 'play' || p === 'busy';
     ['endturn-wrap', 'news', 'mapmodes'].forEach((id) => U.el(id).classList.toggle('hidden', !playing));
     U.el('busy').classList.toggle('hidden', !(p === 'busy' && showBusy));
-    U.el('btn-endturn').disabled = p !== 'play';
     U.el('tb-res').classList.toggle('hidden', !playing);
     ['btn-diplo', 'btn-save', 'btn-tech'].forEach((id) => { U.el(id).disabled = p !== 'play'; });
     updatePanel(); updateTop();
@@ -286,6 +287,7 @@
   S.frame = function (dt) {
     if (!map) return;
     waveT += dt;
+    if (phase === 'play' && !UI.isModalOpen()) LOL.campaign.update(dt);
     if (dirty) { renderMap(); dirty = false; }
     const W = canvas.width, H = canvas.height;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -367,10 +369,11 @@
       const [x, y] = toScreen(p.cx, p.cy);
       if (x < -50 || y < -50 || x > W + 50 || y > H + 50) continue;
       const tot = U.sumUnits(p.units);
-      if (p.isCapital && (map.kind !== 'world' || cam.s > 1.2 || p.owner === G.playerId)) capitalIcon(x, y - (tot && counterVisible(p) ? 17 : 0));
+      if (p.isCapital && (map.kind !== 'world' || cam.s > 2.2 || p.owner === G.playerId)) capitalIcon(x, y - (tot && counterVisible(p) ? 17 : 0));
       else if (cam.s > 1.1 && p.buildings.fort > 0) { ctx.fillStyle = 'rgba(30,30,30,.8)'; ctx.fillRect(x - 3, y - (tot ? 19 : 4), 6, 6); }
       if (tot > 0 && !anims.some((a) => a.to === p.id && a.t < a.dur) && counterVisible(p)) counter(p, x, y, tot);
     }
+    if (G.playerId >= 0 && (phase === 'play' || phase === 'busy' || phase === 'over')) LOL.campaign.draw(ctx, waveT);
     // move anims
     anims = anims.filter((a) => a.t < a.dur + 0.05);
     for (const a of anims) {
@@ -459,7 +462,6 @@
     ctx.strokeStyle = own ? (p.id === sel ? '#ffe9a0' : 'rgba(255,255,255,0.75)') : 'rgba(0,0,0,0.9)';
     ctx.lineWidth = own && p.id === sel ? 2 : 1;
     rr(bx + 0.5, by + 0.5, w - 1, h - 1, 4); ctx.stroke();
-    if (own && phase === 'play' && U.sumUnits(p.ready) === 0) { ctx.fillStyle = 'rgba(0,0,0,0.45)'; rr(bx, by, w, h, 4); ctx.fill(); }
   }
   function fakeCounter(n, x, y, num) {
     ctx.fillStyle = n.color; ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
@@ -483,9 +485,9 @@
     } else if (type === 'down') {
       if (phase === 'menu') return;
       if (e.button === 0 || e.button === 1) drag = { x: mx, y: my, cx: cam.x, cy: cam.y, moved: false };
-      else if (e.button === 2) rightClick(pidAt(mx, my));
+      else if (e.button === 2) rightClick(pidAt(mx, my), mx, my);
     } else if (type === 'up') {
-      if (drag && !drag.moved && e.button === 0 && !UI.isModalOpen()) leftClick(pidAt(mx, my));
+      if (drag && !drag.moved && e.button === 0 && !UI.isModalOpen()) leftClick(pidAt(mx, my), mx, my);
       drag = null;
     } else if (type === 'wheel') {
       if (phase === 'menu') return;
@@ -496,49 +498,32 @@
     } else if (type === 'leave') {
       hover = -1;
     } else if (type === 'keydown') {
-      if (e.key === 'Escape') { sel = -1; dirty = true; updatePanel(); }
-      if (e.key === 'Enter' && phase === 'play' && !UI.isModalOpen()) endTurn();
+      if (e.key === 'Escape') { sel = -1; LOL.campaign.deselect(); dirty = true; updatePanel(); }
+      if (phase === 'play' && !UI.isModalOpen()) LOL.campaign.key(e);
     }
   };
 
-  function leftClick(p) {
+  function leftClick(p, mx, my) {
     LOL.audio.init();
+    if (phase === 'play' && LOL.campaign.leftClick(mx, my)) { sel = -1; dirty = true; updatePanel(); return; }
+    if (phase === 'play' || phase === 'busy') LOL.campaign.deselect();
     if (phase === 'pick') { sel = p; dirty = true; updatePanel(); LOL.audio.play('select'); return; }
     if (phase !== 'play' && phase !== 'busy') return;
     if (p !== sel) selTab = p >= 0 && P(p).owner === G.playerId ? selTab : 'genel';
     sel = p;
-    if (p >= 0) { send = U.copyUnits(P(p).ready); LOL.audio.play('select'); }
+    if (p >= 0) { send = U.copyUnits(P(p).units); LOL.audio.play('select'); }
     dirty = true;
     updatePanel();
   }
 
-  async function rightClick(t) {
-    if (phase !== 'play' || sel < 0 || t < 0 || t === sel) return;
-    const from = P(sel), to = P(t);
-    if (from.owner !== G.playerId) return;
-    if (!from.neighbors.includes(t)) { UI.toast('Sadece komşu bölgelere hareket edebilirsin.', 'bad'); return; }
-    const units = clampSend(from);
-    if (U.sumUnits(units) === 0) { UI.toast('Bu bölgede hazır birlik yok — birlikler ayda bir kez hareket edebilir.', 'bad'); return; }
-    if (to.owner !== G.playerId && !atWar(G.playerId, to.owner)) {
-      if (allied(G.playerId, to.owner)) { UI.toast('Müttefikine saldıramazsın.', 'bad'); return; }
-      if (truce(G.playerId, to.owner)) { UI.toast(`${nation(to.owner).name} ile ateşkes var (${G.truce[key(G.playerId, to.owner)] - G.turn} ay).`, 'bad'); return; }
-      const ok = await UI.modal('Savaş İlanı', `<p>${UI.flag(nation(to.owner))}<b>${U.esc(nation(to.owner).name)}</b> ile barış içindesin. Saldırmak için savaş ilan etmelisin.</p>
-        ${alliesOf(to.owner).length ? `<p class="hint">Müttefikleri de sana savaş açacak: <b>${alliesOf(to.owner).map((n) => U.esc(n.name)).join(', ')}</b></p>` : ''}
-        <p class="hint">İstikrar −5</p>`,
-      [{ label: 'Vazgeç', value: false }, { label: 'Savaş İlan Et', value: true, cls: 'danger' }]);
-      if (!ok) return;
-      declareWar(G.playerId, to.owner);
-      nation(G.playerId).stability = Math.max(0, nation(G.playerId).stability - 5);
-    }
-    S.setPhase('busy');
-    await moveArmy(from, to, units);
-    if (phase !== 'over') S.setPhase('play');
-    if (sel >= 0) send = U.copyUnits(P(sel).ready);
-    updatePanel(); updateTop();
+  function rightClick(t, mx, my) {
+    if (phase !== 'play') return;
+    const [wx, wy] = toWorld(mx, my);
+    LOL.campaign.rightClick(t, wx, wy, mx, my);
   }
   function clampSend(p) {
     const u = U.zeroUnits();
-    U.TYPES.forEach((t) => { u[t] = U.clamp(send[t] | 0, 0, p.ready[t]); });
+    U.TYPES.forEach((t) => { u[t] = U.clamp(send[t] | 0, 0, p.units[t]); });
     return u;
   }
 
@@ -675,96 +660,69 @@
       <div class="units-row">${U.TYPES.filter((t) => units[t] > 0).map((t) => `<div class="ucard"><img src="${UI.unitIcon(t, n.color)}"><div class="n">${units[t]}</div><div class="t">${C.unitShort[t]}</div></div>`).join('')}</div></div>`;
   }
 
-  async function moveArmy(from, to, units) {
-    const owner = from.owner;
-    U.TYPES.forEach((t) => { from.units[t] -= units[t]; from.ready[t] = Math.max(0, from.ready[t] - units[t]); });
-    if (to.owner === owner) {
-      U.TYPES.forEach((t) => { to.units[t] += units[t]; });
-      animMove(from, to, units, owner);
-      dirty = true;
-      return;
-    }
-    const defender = to.owner;
-    animMove(from, to, units, owner);
-    if (U.sumUnits(to.units) === 0) {
-      if (isPlayer(owner) || isPlayer(defender)) await U.sleep(300);
-      capture(to, owner, units);
-      if (isPlayer(owner) || isPlayer(defender) || map.kind !== 'world') news('flag', U.shade(nation(owner).color, -0.3), `${nn(owner)}, ${U.esc(to.name)} bölgesini direnişsiz ele geçirdi.`, '', isPlayer(owner) || isPlayer(defender));
-      checkGameOver();
-      return;
-    }
+  // Resolve a battle. prov = province where it happens (siege if !field).
+  // Returns null if the player cancels, otherwise {winner, attSurv, defSurv, retreated}.
+  async function fight(owner, units, defender, defUnits, prov, field) {
     const playerInvolved = isPlayer(owner) || isPlayer(defender);
+    const place = field ? `${prov.name} yakınları` : prov.name;
+    const dB = field ? 1.05 : defBonus(prov);
+    if (!playerInvolved) {
+      const fake = field ? { isCapital: false, buildings: { fort: 0 }, owner: defender } : prov;
+      return autoResolveB(units, defUnits, owner, defender, dB, fake);
+    }
+    const pAtt = isPlayer(owner);
+    const A = powerOf(units, owner), D = powerOf(defUnits, defender) * dB;
+    const pa = A / (A + D);
+    const myShare = pAtt ? pa : 1 - pa;
+    const odds = myShare > 0.68 ? 'Çok yüksek' : myShare > 0.55 ? 'Yüksek' : myShare > 0.45 ? 'Dengeli' : myShare > 0.32 ? 'Düşük' : 'Çok düşük';
+    const banner = `<div class="banner"><div class="bg" style="background:linear-gradient(120deg, ${U.shade(nation(owner).color, -0.4)}, #1a0c08 45%, #1a0c08 55%, ${U.shade(nation(defender).color, -0.4)})"></div>
+      <div class="big-ico">${UI.icon('sword', 80)}</div><div><div class="bk">${field ? (pAtt ? 'Meydan muharebesi' : 'Ordun saldırı altında') : pAtt ? 'Kuşatma' : 'Şehrin kuşatılıyor'}</div><div class="bt">${U.esc(place)} Muharebesi</div></div></div>`;
+    const body = `<div class="vs">${sideCard(nation(owner), units, 'Saldıran')}<div class="mid">VS</div>${sideCard(nation(defender), defUnits, field ? `Savunan · ${prov.terrain}` : `Savunan · ${prov.terrain}${prov.buildings.fort ? ' · Tahkimat ' + prov.buildings.fort : ''}${prov.isCapital ? ' · Başkent' : ''}`)}</div>
+      <div class="odds"><div class="ob"><div style="width:${pa * 100}%;background:${nation(owner).color}"></div><div style="flex:1;background:${nation(defender).color}"></div></div>
+      <div class="ol"><span>Kuvvet ${Math.round(A)}</span><span>Zafer şansın: <b style="color:var(--text)">${odds}</b></span><span>${Math.round(D)} Kuvvet</span></div></div>
+      <p class="hint">"<b>Savaşı Yönet</b>" ile izometrik savaş alanına inip birliklerine bizzat komuta edersin.</p>`;
+    const btns = [{ label: 'Otomatik Çöz', value: 'auto' }, { label: '⚔ Savaşı Yönet', value: 'tactical', cls: 'primary' }];
+    if (pAtt) btns.unshift({ label: 'Geri Çekil', value: 'cancel' });
+    if (!pAtt) LOL.audio.play('war');
+    const choice = await UI.modal('', body, btns, { banner, width: 640 });
+    if (choice === 'cancel') return null;
     let result;
-    if (playerInvolved) {
-      await U.sleep(250);
-      const pAtt = isPlayer(owner);
-      const A = powerOf(units, owner), D = powerOf(to.units, defender) * defBonus(to);
-      const pa = A / (A + D);
-      const myShare = pAtt ? pa : 1 - pa;
-      const odds = myShare > 0.68 ? 'Çok yüksek' : myShare > 0.55 ? 'Yüksek' : myShare > 0.45 ? 'Dengeli' : myShare > 0.32 ? 'Düşük' : 'Çok düşük';
-      const banner = `<div class="banner"><div class="bg" style="background:linear-gradient(120deg, ${U.shade(nation(owner).color, -0.4)}, #1a0c08 45%, #1a0c08 55%, ${U.shade(nation(defender).color, -0.4)})"></div>
-        <div class="big-ico">${UI.icon('sword', 80)}</div><div><div class="bk">${pAtt ? 'Taarruz' : 'Saldırı altındasın'}</div><div class="bt">${U.esc(to.name)} Muharebesi</div></div></div>`;
-      const body = `<div class="vs">${sideCard(nation(owner), units, 'Saldıran')}<div class="mid">VS</div>${sideCard(nation(defender), to.units, `Savunan · ${to.terrain}${to.buildings.fort ? ' · Tahkimat ' + to.buildings.fort : ''}${to.isCapital ? ' · Başkent' : ''}`)}</div>
-        <div class="odds"><div class="ob"><div style="width:${pa * 100}%;background:${nation(owner).color}"></div><div style="flex:1;background:${nation(defender).color}"></div></div>
-        <div class="ol"><span>Kuvvet ${Math.round(A)}</span><span>Zafer şansın: <b style="color:var(--text)">${odds}</b></span><span>${Math.round(D)} Kuvvet</span></div></div>
-        <p class="hint">"<b>Savaşı Yönet</b>" ile izometrik savaş alanına inip birliklerine bizzat komuta edersin. Arazi ve tahkimatlar savaş alanına yansır.</p>`;
-      const btns = [{ label: 'Otomatik Çöz', value: 'auto' }, { label: '⚔ Savaşı Yönet', value: 'tactical', cls: 'primary' }];
-      if (pAtt) btns.unshift({ label: 'İptal', value: 'cancel' });
-      if (!pAtt) LOL.audio.play('war');
-      const choice = await UI.modal('', body, btns, { banner, width: 640 });
-      if (choice === 'cancel') {
-        U.TYPES.forEach((t) => { from.units[t] += units[t]; from.ready[t] += units[t]; });
-        anims = anims.filter((a) => a.to !== to.id);
-        dirty = true;
-        return;
-      }
-      if (choice === 'tactical') {
-        result = await LOL.app.startBattle({
-          provinceName: to.name, terrain: to.terrain, biome: to.biome, month: ((G.turn - 1) % 12) + 1, fort: Math.round(to.buildings.fort * (1 + (eff(defender).fort || 0))),
-          attacker: nation(owner), defender: nation(defender),
-          attUnits: U.copyUnits(units), defUnits: U.copyUnits(to.units),
-          attEff: eff(owner), defEff: eff(defender),
-          playerSide: pAtt ? 'attacker' : 'defender',
-          seed: (G.seed * 31 + to.id * 7919 + G.turn * 131) >>> 0,
-        });
-      } else {
-        result = autoResolve(units, to.units, to, owner, defender);
-        const win = (result.winner === 'attacker') === pAtt;
-        const lossA = U.zeroUnits(), lossD = U.zeroUnits();
-        U.TYPES.forEach((t) => { lossA[t] = units[t] - result.attSurv[t]; lossD[t] = to.units[t] - result.defSurv[t]; });
-        LOL.audio.play(win ? 'victory' : 'defeat');
-        await UI.modal(win ? 'ZAFER' : 'YENİLGİ', `<p style="text-align:center;color:var(--muted)">${U.esc(to.name)} muharebesi</p>
-          <table><tr><th>Taraf</th><th>Kayıplar</th></tr>
-          <tr><td>${UI.flag(nation(owner), 14)}${U.esc(nation(owner).name)}</td><td>${U.unitsText(lossA)}</td></tr>
-          <tr><td>${UI.flag(nation(defender), 14)}${U.esc(nation(defender).name)}</td><td>${U.unitsText(lossD)}</td></tr></table>`,
-        [{ label: 'Devam', value: 1, cls: 'primary' }], { cls: win ? 'win' : 'lose' });
-      }
+    if (choice === 'tactical') {
+      result = await LOL.app.startBattle({
+        provinceName: place, terrain: prov.terrain, biome: prov.biome, month: ((G.turn - 1) % 12) + 1,
+        fort: field ? 0 : Math.round(prov.buildings.fort * (1 + (eff(defender).fort || 0))),
+        attacker: nation(owner), defender: nation(defender),
+        attUnits: U.copyUnits(units), defUnits: U.copyUnits(defUnits),
+        attEff: eff(owner), defEff: eff(defender),
+        playerSide: pAtt ? 'attacker' : 'defender',
+        seed: (G.seed * 31 + prov.id * 7919 + G.turn * 131 + (G.day || 0) * 17) >>> 0,
+      });
     } else {
-      if (map.kind !== 'world') await U.sleep(120);
-      result = autoResolve(units, to.units, to, owner, defender);
+      const fake = field ? { isCapital: false, buildings: { fort: 0 }, owner: defender } : prov;
+      result = autoResolveB(units, defUnits, owner, defender, dB, fake);
+      const win = (result.winner === 'attacker') === pAtt;
+      const lossA = U.zeroUnits(), lossD = U.zeroUnits();
+      U.TYPES.forEach((t) => { lossA[t] = units[t] - result.attSurv[t]; lossD[t] = defUnits[t] - result.defSurv[t]; });
+      LOL.audio.play(win ? 'victory' : 'defeat');
+      await UI.modal(win ? 'ZAFER' : 'YENİLGİ', `<p style="text-align:center;color:var(--muted)">${U.esc(place)} muharebesi</p>
+        <table><tr><th>Taraf</th><th>Kayıplar</th></tr>
+        <tr><td>${UI.flag(nation(owner), 14)}${U.esc(nation(owner).name)}</td><td>${U.unitsText(lossA)}</td></tr>
+        <tr><td>${UI.flag(nation(defender), 14)}${U.esc(nation(defender).name)}</td><td>${U.unitsText(lossD)}</td></tr></table>`,
+      [{ label: 'Devam', value: 1, cls: 'primary' }], { cls: win ? 'win' : 'lose' });
     }
-    applyResult(from, to, owner, defender, result);
-    checkGameOver();
+    return result;
   }
-
-  function applyResult(from, to, att, def, r) {
-    const involved = isPlayer(att) || isPlayer(def);
-    if (r.winner === 'attacker') {
-      const dsurv = r.defSurv || U.zeroUnits();
-      if (U.sumUnits(dsurv) > 0) {
-        const ref = to.neighbors.map(P).find((q) => q.owner === def);
-        if (ref) U.TYPES.forEach((t) => { ref.units[t] += dsurv[t]; });
-      }
-      capture(to, att, r.attSurv);
-      if (involved || map.kind !== 'world') news('sword', isPlayer(att) ? '#3c7a3a' : isPlayer(def) ? '#a83226' : '#6a4a2a', `${nn(att)} ordusu ${U.esc(to.name)} bölgesini fethetti.`, involved ? `${nn(def)} savunması çöktü.` : '', involved);
-    } else {
-      to.units = U.copyUnits(r.defSurv);
-      U.TYPES.forEach((t) => { to.ready[t] = Math.min(to.ready[t], to.units[t]); });
-      const asurv = r.attSurv || U.zeroUnits();
-      if (from.owner === att) U.TYPES.forEach((t) => { from.units[t] += asurv[t]; });
-      if (involved) news('fort', isPlayer(def) ? '#3c7a3a' : '#a83226', `${U.esc(to.name)} önünde ${nn(att)} taarruzu püskürtüldü.`, `${nn(def)} hatlarını korudu.`, true);
-      dirty = true;
-    }
+  function autoResolveB(att, def, an, dn, dB) {
+    const A = powerOf(att, an) * (0.85 + Math.random() * 0.3);
+    const D = powerOf(def, dn) * dB * (0.85 + Math.random() * 0.3);
+    const attWin = A > D;
+    const Wp = Math.max(A, D), Lp = Math.min(A, D);
+    const lossFrac = Math.min(0.92, 0.65 * Math.pow(Lp / Math.max(0.01, Wp), 1.3) + 0.05);
+    const wu = attWin ? att : def;
+    const surv = U.zeroUnits();
+    U.TYPES.forEach((t) => { surv[t] = Math.max(0, Math.round(wu[t] * (1 - lossFrac * (0.75 + Math.random() * 0.5)))); });
+    if (U.sumUnits(surv) === 0) { const t = U.TYPES.find((k) => wu[k] > 0); if (t) surv[t] = 1; }
+    return { winner: attWin ? 'attacker' : 'defender', attSurv: attWin ? surv : U.zeroUnits(), defSurv: attWin ? U.zeroUnits() : surv };
   }
 
   function checkGameOver() {
@@ -790,21 +748,18 @@
   }
 
   // ---------------------------------------------------------------- turns
-  async function endTurn() {
+  // Called by the campaign clock at the end of every month
+  async function monthEnd() {
     if (phase !== 'play') return;
     LOL.audio.play('turn');
-    sel = -1; dirty = true;
-    S.setPhase('busy', true);
     for (const n of G.nations) {
       if (!n.alive || isPlayer(n.id)) continue;
-      U.el('busy-text').innerHTML = `${UI.flag(n, 12)} ${U.esc(n.name)} hamle yapıyor...`;
       await aiTurn(n);
       if (phase === 'over') return;
       if (checkGameOver()) return;
     }
     await newRound();
     if (phase === 'over') return;
-    S.setPhase('play');
     await maybeEvent();
     updatePanel(); updateTop();
     save(true);
@@ -932,49 +887,6 @@
       if (n.gold - reserve < unitCost(me, t, p) || n.manpower < MP_COST[t]) t = 'inf';
       if (!recruit(p, t, 1)) break;
     }
-    // --- attacks
-    const order = mine.slice().sort((a, b) => powerOf(b.ready) - powerOf(a.ready));
-    for (const p of order) {
-      if (p.owner !== me || powerOf(p.ready) < 2) continue;
-      let best = null, bs = 0;
-      for (const q of p.neighbors.map(P)) {
-        if (q.owner === me || !atWar(me, q.owner)) continue;
-        const dp = powerOf(q.units, q.owner) * defBonus(q);
-        const ratio = powerOf(p.ready, me) / Math.max(0.5, dp);
-        const score = ratio + (q.isCapital ? 0.3 : 0) + q.income * 0.03;
-        if (ratio > 1.3 && score > bs) { bs = score; best = q; }
-      }
-      if (best) {
-        const units = U.copyUnits(p.ready);
-        if (threat(p, me) > 0 && units.inf > 1) units.inf -= 1;
-        if (U.sumUnits(units) === 0) continue;
-        await moveArmy(p, best, units);
-        if (phase === 'over') return;
-      }
-    }
-    // --- reinforce toward the front
-    const q0 = provsOf(me).filter(isFront);
-    if (q0.length) {
-      const dist = new Map(), queue = [];
-      q0.forEach((p) => { dist.set(p.id, 0); queue.push(p); });
-      while (queue.length) {
-        const p = queue.shift();
-        for (const q of p.neighbors.map(P)) {
-          if (q.owner !== me || dist.has(q.id)) continue;
-          dist.set(q.id, dist.get(p.id) + 1); queue.push(q);
-        }
-      }
-      for (const p of provsOf(me)) {
-        const d = dist.get(p.id);
-        if (!d || U.sumUnits(p.ready) === 0) continue;
-        const next = p.neighbors.map(P).filter((q) => q.owner === me && dist.get(q.id) === d - 1)[0];
-        if (!next) continue;
-        const units = U.copyUnits(p.ready);
-        if (units.inf > 0) units.inf -= 1;
-        if (U.sumUnits(units) === 0) continue;
-        await moveArmy(p, next, units);
-      }
-    }
   }
   function threat(p, me) {
     let t = 0;
@@ -1057,14 +969,15 @@
     const ws = enemiesOf(G.playerId), al = alliesOf(G.playerId);
     U.el('tb-wars').innerHTML = (ws.length ? '<span class="war">⚔ ' + ws.map((w) => U.esc(w.name)).join(', ') + '</span>' : '<span class="peace">Barış</span>') +
       (al.length ? ' · <span style="color:#a8d8ff">🤝 ' + al.map((w) => U.esc(w.name)).join(', ') + '</span>' : '');
-    U.el('endturn-label').textContent = MONTHS[G.turn % 12];
+    LOL.campaign.renderTime();
     if (LOL.advisor) LOL.advisor.refresh();
-    U.el('endturn-info').textContent = cur ? '' : 'Araştırma seçilmedi';
-    if (!cur) U.el('endturn-info').innerHTML = '<span style="color:#e8c050">⚠ Araştırma seçilmedi</span>';
+    U.el('endturn-info').innerHTML = cur ? '' : '<span style="color:#e8c050">⚠ Araştırma seçilmedi</span>';
   }
 
   function updatePanel() {
     const el = U.el('prov-panel');
+    const army = G && phase !== 'menu' && phase !== 'pick' ? LOL.campaign.selectedArmy() : null;
+    if (army) { el.classList.remove('hidden'); el.innerHTML = LOL.campaign.panelHtml(army); return; }
     if (!G || sel < 0 || phase === 'menu') { el.classList.add('hidden'); return; }
     el.classList.remove('hidden');
     const p = P(sel), n = nation(p.owner);
@@ -1102,8 +1015,8 @@
         <div class="stat"><div class="k">Savunma</div><div class="v">×${defBonus(p).toFixed(2)}</div></div>
         <div class="stat"><div class="k">Binalar</div><div class="v" style="font-size:12px">${Object.keys(BUILD).map((k) => `${UI.icon(BUILD[k].ico, 14)}${p.buildings[k]}`).join(' ')}</div></div></div>
         <div class="sect-title">Garnizon</div>
-        ${U.sumUnits(p.units) ? `<div class="units-row">${U.TYPES.filter((t) => p.units[t] > 0).map((t) => `<div class="ucard" title="${C.unitName[t]}: ${C.unitDesc[t]}"><img src="${UI.unitIcon(t, n.color)}"><div class="n">${p.units[t]}</div><div class="t">${C.unitShort[t]}${own ? ` <span class="r">${p.ready[t]} hazır</span>` : ''}</div></div>`).join('')}</div>` : '<div class="hint">Garnizon yok — bölge savunmasız!</div>'}`;
-      if (own && U.sumUnits(p.ready) > 0) body += sendHtml(p);
+        ${U.sumUnits(p.units) ? `<div class="units-row">${U.TYPES.filter((t) => p.units[t] > 0).map((t) => `<div class="ucard" title="${C.unitName[t]}: ${C.unitDesc[t]}"><img src="${UI.unitIcon(t, n.color)}"><div class="n">${p.units[t]}</div><div class="t">${C.unitShort[t]}</div></div>`).join('')}</div>` : '<div class="hint">Garnizon yok — bölge savunmasız!</div>'}`;
+      if (own && U.sumUnits(p.units) > 0) body += sendHtml(p);
       if (!own && phase === 'play') {
         body += `<div class="sect-title">Diplomasi</div><div class="row"><span>İlişki</span><b>${rel(me, p.owner)}</b></div><div class="btnrow">` +
           (atWar(me, p.owner) ? `<button data-act="peace">Barış Teklif Et</button>`
@@ -1118,7 +1031,7 @@
         const dis = lock || nat.gold < c || nat.manpower < MP_COST[t] || phase !== 'play';
         return `<button data-act="rec" data-t="${t}" ${dis ? 'disabled' : ''} title="${C.unitName[t]} — ${C.unitDesc[t]}${lock ? ' (Gerekli teknoloji: ' + TECH[C.req[t]].name + ')' : ''}"><img src="${UI.unitIcon(t, n.color)}"><span>${C.unitShort[t]}</span>${lock ? `<small class="mp">🔒 ${TECH[C.req[t]].name}</small>` : `<small>${c} altın</small><small class="mp">${fmtK(MP_COST[t])} kişi</small>`}</button>`;
       }).join('')}</div><div class="hint">Shift+tık: 5 adet. Yeni birlikler gelecek ay hareket edebilir. Birliklerin üzerine gelince açıklamasını görürsün.</div>`;
-      if (U.sumUnits(p.ready) > 0) body += sendHtml(p);
+      if (U.sumUnits(p.units) > 0) body += sendHtml(p);
     } else if (selTab === 'insa') {
       const nat = nation(me);
       body += Object.keys(BUILD).map((k) => {
@@ -1135,13 +1048,23 @@
     el.innerHTML = head + (tabs.length > 1 ? `<div class="tabs">${tabs.map((t) => `<button data-tab="${t}" class="${t === selTab ? 'on' : ''}">${tabNames[t]}</button>`).join('')}</div>` : '') + `<div class="pp-body">${body}</div>`;
   }
   function sendHtml(p) {
-    return `<div class="sect-title">Sefer Kuvveti</div>
-      ${U.TYPES.filter((t) => p.ready[t] > 0).map((t) => `<div class="send-row"><span>${C.unitShort[t]}</span><input type="range" min="0" max="${p.ready[t]}" value="${Math.min(send[t], p.ready[t])}" data-send="${t}"><b id="sv-${t}">${Math.min(send[t], p.ready[t])}</b></div>`).join('')}
-      <div class="hint">Haritada komşu bir bölgeye <b>sağ tıkla</b>. Düşman bölgesine gönderirsen muharebe başlar.</div>`;
+    return `<div class="sect-title">Ordu Kur</div>
+      ${U.TYPES.filter((t) => p.units[t] > 0).map((t) => `<div class="send-row"><span>${C.unitShort[t]}</span><input type="range" min="0" max="${p.units[t]}" value="${Math.min(send[t], p.units[t])}" data-send="${t}"><b id="sv-${t}">${Math.min(send[t], p.units[t])}</b></div>`).join('')}
+      <button class="primary" data-act="form" style="width:100%;margin-top:6px">⚑ Seçili Birliklerle Ordu Kur</button>
+      <div class="hint">Ordu haritada bayrağıyla belirir. Orduyu seçip haritada istediğin yere <b>sağ tıkla</b>; düşman ordusuna sağ tıklarsan peşine düşer.</div>`;
   }
 
   async function panelAction(act, target, e) {
     if (act === 'start') { startGame(P(sel).owner); return; }
+    if (act.startsWith('army-')) { await LOL.campaign.action(act, target); updatePanel(); updateTop(); return; }
+    if (act === 'form' && sel >= 0) {
+      const p = P(sel), u = clampSend(p);
+      if (U.sumUnits(u) === 0) { UI.toast('Orduya en az bir birlik seç.', 'bad'); return; }
+      U.TYPES.forEach((t) => { p.units[t] -= u[t]; });
+      LOL.campaign.formArmy(G.playerId, u, p);
+      sel = -1; dirty = true; updatePanel(); updateTop();
+      return;
+    }
     if (act === 'close') { sel = -1; dirty = true; updatePanel(); return; }
     if (phase !== 'play' || sel < 0) return;
     const p = P(sel);
@@ -1270,7 +1193,9 @@
       <div class="slider-row"><span>Efektler</span><input type="range" min="0" max="100" value="${A.vol.sfx * 100}" data-v="sfx"><b>${Math.round(A.vol.sfx * 100)}</b></div>
       <div class="slider-row"><span>Ses açık</span><input type="checkbox" id="set-en" ${A.enabled ? 'checked' : ''}><span></span></div>
       <div class="slider-row"><span>Telsiz sesleri</span><input type="checkbox" id="set-voice" ${A.voice ? 'checked' : ''}><span class="hint" style="margin:0">${A.hasVoice() ? '' : 'Tarayıcında Türkçe ses yok'}</span></div>`;
-    UI.modal('Ses Ayarları', body, [{ label: 'Tamam', value: 0, cls: 'primary' }], {
+    UI.modal('Ayarlar', `<div class="sect-title" style="margin-top:0">Ses</div>${body}<div class="sect-title">Yapay Zekâ Danışman</div>
+      <p class="hint" style="margin-top:0">Danışmanla sohbet için kendi Gemini ya da Claude API anahtarını bağla.</p>
+      <button class="primary" id="set-ai" style="width:100%">🔑 Yapay Zekâ Ayarları (API Anahtarı)</button>`, [{ label: 'Tamam', value: 0, cls: 'primary' }], {
       closeOnBack: true,
       onMount: (wrap) => {
         wrap.querySelectorAll('[data-v]').forEach((r) => {
@@ -1279,6 +1204,7 @@
         });
         wrap.querySelector('#set-en').onchange = (e) => { A.enabled = e.target.checked; A.applyVolumes(); A.saveSettings(); };
         wrap.querySelector('#set-voice').onchange = (e) => { A.voice = e.target.checked; A.saveSettings(); };
+        wrap.querySelector('#set-ai').onclick = () => { wrap.querySelector('.modal-btns button').click(); setTimeout(() => LOL.advisor.openSettings(), 160); };
       },
     });
   };
@@ -1287,13 +1213,14 @@
   function startGame(nid) {
     G.playerId = nid;
     G.news = [];
+    LOL.campaign.reset();
     if (LOL.advisor) LOL.advisor.reset();
     const n = nation(nid);
     news('crown', '#a8741a', `${nn(nid)} hükümdarı göreve başladı`, `${U.esc(n.leader)}: "Atalarımızın topraklarını genişletmenin vakti geldi."`, true);
     news('globe', '#3a4a6a', 'Dünya gerginliğin eşiğinde', 'Sekiz büyük güç sınırlarına asker yığıyor. Diplomatlar barışı korumaya çalışıyor.', false);
     sel = n.capital;
     selTab = 'genel';
-    send = U.copyUnits(P(sel).ready);
+    send = U.copyUnits(P(sel).units);
     dirty = true;
     S.setPhase('play');
     LOL.audio.play('event');
@@ -1302,7 +1229,7 @@
       if (phase !== 'play') return;
       UI.modal('', `<p class="event-text">"Sayın ${U.esc(n.leader.split(' ')[0])}, kabine toplandı. Ülke sizden yön bekliyor."</p>
         <p><b>İlk adımlar:</b></p>
-        <p>• Üst bardan <b>Teknoloji</b> açıp bir araştırma seç.<br>• Başkentini seçip <b>Ordu</b> sekmesinden asker topla, <b>İnşaat</b> sekmesinden fabrika kur.<br>• Komşu bir bölgeye <b>sağ tıklayarak</b> ordunu gönder.<br>• Hazır olduğunda <b>sağ alttaki</b> düğmeyle ayı bitir.</p>`,
+        <p>• Üst bardan <b>Teknoloji</b> açıp bir araştırma seç.<br>• Başkentini seçip <b>Ordu</b> sekmesinden asker topla, <b>İnşaat</b> sekmesinden fabrika kur.<br>• <b>Ordu</b> sekmesinden <b>Ordu Kur</b>: ordun bayrağıyla haritada belirir. Orduyu seçip haritada istediğin yere <b>sağ tıkla</b>.<br>• Zaman sağ alttan akar: <b>Boşluk</b> duraklatır, <b>1-2-3</b> hızı değiştirir. Her ay sonunda ekonomi ve diplomasi işlenir.</p>`,
       [{ label: 'Göreve Başla', value: 1, cls: 'primary' }], { width: 540, banner: `<div class="banner"><div class="bg" style="background:linear-gradient(120deg, ${U.shade(n.color, -0.3)}, #0d1118 70%)"></div><div class="big-ico">${UI.icon('crown', 80)}</div><div><div class="bk">${dateStr(1)}</div><div class="bt">${U.esc(n.name)}</div></div></div>` });
     }, 300);
   }
@@ -1321,6 +1248,7 @@
       seed: G.seed, kind: G.kind, turn: G.turn, playerId: G.playerId,
       nations: G.nations.map((n) => ({ advisor: n.advisor, gold: n.gold, alive: n.alive, capital: n.capital, manpower: n.manpower, stability: n.stability, techs: n.techs, research: n.research, gov: n.gov, leader: n.leader, flagSeed: n.flagSeed })),
       provinces: G.provinces.map((p) => ({ o: p.owner, u: p.units, r: p.ready, c: p.isCapital, b: p.buildings, q: p.queue })),
+      day: G.day, nextArmyId: G.nextArmyId, armies: G.armies.map((a) => ({ id: a.id, owner: a.owner, units: a.units, x: a.x, y: a.y, prov: a.prov, name: a.name, wp: a.wp, dest: a.dest })),
       wars: [...G.wars], allies: [...G.allies], truce: G.truce, rel: G.rel, news: G.news.slice(0, 30),
     };
     try {
@@ -1337,6 +1265,8 @@
     G.turn = data.turn; G.playerId = data.playerId;
     data.nations.forEach((d, i) => Object.assign(G.nations[i], d));
     data.provinces.forEach((d, i) => { const p = G.provinces[i]; p.owner = d.o; p.units = d.u; p.ready = d.r; p.isCapital = d.c; p.buildings = d.b; p.queue = d.q; });
+    G.day = data.day || 0; G.nextArmyId = data.nextArmyId || 1;
+    G.armies = (data.armies || []).map((a) => ({ chase: null, idle: 0, ...a, wp: a.wp || [] }));
     G.wars = new Set(data.wars); G.allies = new Set(data.allies || []); G.truce = data.truce || {}; G.rel = data.rel || {}; G.news = data.news || [];
     sel = -1; dirty = true;
     S.setPhase('play');
@@ -1347,7 +1277,6 @@
 
   S.bindUI = function () {
     document.querySelectorAll('[data-ico]').forEach((e) => { e.outerHTML = UI.icon(e.dataset.ico, 18); });
-    U.el('btn-endturn').onclick = () => endTurn();
     U.el('btn-diplo').onclick = () => { LOL.audio.play('click'); diplomacy(); };
     U.el('btn-tech').onclick = () => { LOL.audio.play('click'); techScreen(); };
     U.el('tb-nation').onclick = () => { if (phase === 'play' || phase === 'busy') { LOL.audio.play('click'); nationScreen(); } };
@@ -1404,8 +1333,8 @@
         const qp = powerOf(q.units, q.owner);
         e += qp;
         if (qp > big) { big = qp; enemyId = q.owner; }
-        const ratio = powerOf(p.ready, me) / Math.max(0.5, qp * defBonus(q));
-        if (ratio > 1.5 && powerOf(p.ready, me) >= 3) opps.push({ from: p.id, fromName: p.name, to: q.id, toName: q.name, att: Math.round(powerOf(p.ready, me)), def: Math.round(qp * defBonus(q)), ratio });
+        const ratio = powerOf(p.units, me) / Math.max(0.5, qp * defBonus(q));
+        if (ratio > 1.5 && powerOf(p.units, me) >= 3) opps.push({ from: p.id, fromName: p.name, to: q.id, toName: q.name, att: Math.round(powerOf(p.units, me)), def: Math.round(qp * defBonus(q)), ratio });
       }
       const my = powerOf(p.units, me) * defBonus(p);
       if (e > my * 1.1 && enemyId >= 0) threats.push({ id: p.id, name: p.name, enemy: nation(enemyId).name, enemyPower: Math.round(e), myPower: Math.round(my), gap: e - my });
@@ -1437,7 +1366,7 @@
   };
   S.focusProvince = function (id) {
     if (!G || id == null || id < 0) return;
-    sel = id; selTab = 'genel'; send = U.copyUnits(P(id).ready);
+    sel = id; selTab = 'genel'; send = U.copyUnits(P(id).units);
     const p = P(id);
     cam.s = Math.max(cam.s, map.kind === 'world' ? 2.6 : 1.6);
     cam.x = canvas.width / 2 - p.cx * cam.s; cam.y = canvas.height / 2 - p.cy * cam.s;
@@ -1446,6 +1375,12 @@
   S.openTech = () => { if (phase === 'play') techScreen(); };
   S.openDiplo = () => { if (phase === 'play') diplomacy(); };
 
+  S._i = {
+    G: () => G, map: () => map, cam: () => cam, phase: () => phase, P, nation, isPlayer, atWar, allied, truce, key, rel,
+    provsOf, enemiesOf, powerOf, defBonus, fight, capture, news, nn, declareWar, checkGameOver, monthEnd,
+    setDirty: () => { dirty = true; }, updatePanel: () => updatePanel(), updateTop: () => updateTop(), toScreen, toWorld,
+    nationPower, dateStr, MONTHS, focus: (x, y) => { cam.x = canvas.width / 2 - x * cam.s; cam.y = canvas.height / 2 - y * cam.s; },
+  };
   S.refresh = function () { dirty = true; updatePanel(); updateTop(); renderNews(); };
   S.debug = () => ({ G, map, cam, sel, phase });
 })();
