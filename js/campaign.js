@@ -20,6 +20,14 @@
     if (!flagImgs[n.id]) { const im = new Image(); im.src = UI.flagURL(n); flagImgs[n.id] = im; }
     return flagImgs[n.id];
   }
+  K.autoPause = true;
+  try { K.autoPause = localStorage.getItem('lol_autopause') !== '0'; } catch (e) { /* ignore */ }
+  K.alert = function (text) {
+    UI.toast('⚠ ' + text, 'bad');
+    LOL.audio.play('war');
+    setTimeout(() => LOL.audio.say('war'), 900);
+    if (K.autoPause && speed) { speed = 0; K.renderTime(); UI.toast('Oyun duraklatıldı. Devam etmek için <b>Boşluk</b>.'); }
+  };
   K.reset = () => { speed = 0; acc = 0; lock = false; selId = -1; follow = false; for (const k in flagImgs) delete flagImgs[k]; };
   K.isLocked = () => lock;
   K.selectedArmy = () => (selId >= 0 ? byId(selId) || null : null);
@@ -40,7 +48,9 @@
     if (foot === 0) f *= 1.35;
     const p = P(a.prov);
     const tf = p ? ({ 'Ormanlık': 0.8, 'Tepelik': 0.7, 'Çöl': 0.85, 'Tundra': 0.75 }[p.terrain] || 1) : 1;
-    return 11 * scale() * f * tf;
+    const g = I().genById(a.gen);
+    const gs = g ? 1 + (I().TRAITS[g.trait].speed || 0) : 1;
+    return 11 * scale() * f * tf * gs;
   }
   function domClass(u) {
     const c = { inf: 0, tank: 0, art: 0 };
@@ -116,8 +126,16 @@
     const home = nearestOwn(a, from && from.prov != null ? undefined : a.prov);
     if (home) a.wp = [{ x: home.cx, y: home.cy, pid: home.id }];
   }
-  function removeArmy(a) {
+  function removeArmy(a, killed) {
     a.dead = true;
+    const gen = I().genById(a.gen);
+    if (gen) {
+      gen.army = null;
+      if (killed && Math.random() < 0.3) {
+        gen.alive = false;
+        if (I().isPlayer(gen.owner)) UI.toast(`General <b>${U.esc(gen.name)}</b> savaşta şehit düştü.`, 'bad');
+      }
+    }
     const g = G();
     g.armies = g.armies.filter((x) => x !== a);
     if (selId === a.id) { selId = -1; follow = false; }
@@ -135,6 +153,8 @@
       prov: p.id, wp: [], dest: -1, chase: null, cool: 0,
       name: I().isPlayer(owner) ? `${n.armyNo}. Ordu` : `${n.name} ${n.armyNo}. Ordusu`,
     };
+    const free = I().generalsOf(owner).filter((x) => x.army == null).sort((x, y) => y.lvl - x.lvl)[0];
+    if (free) { free.army = a.id; a.gen = free.id; }
     g.armies.push(a);
     if (I().isPlayer(owner)) {
       K.lastFormed = a.id;
@@ -161,9 +181,14 @@
     a.busy = true;
     if (involved) lock = true;
     let r;
-    try { r = await i.fight(a.owner, U.copyUnits(a.units), def, U.copyUnits(p.units), p, false); } finally { lock = false; a.busy = false; }
+    const ga = i.genById(a.gen);
+    const defArmy = armies().find((x) => x.owner === def && x.prov === p.id && !x.wp.length && !x.busy);
+    const gd = defArmy ? i.genById(defArmy.gen) : null;
+    try { r = await i.fight(a.owner, U.copyUnits(a.units), def, U.copyUnits(p.units), p, false, { att: i.genMult(ga, 'siege', a.units), def: i.genMult(gd, 'def', p.units), attGen: ga, defGen: gd }); } finally { lock = false; a.busy = false; }
     if (a.dead) return;
     if (!r) { retreat(a); return; }
+    i.genXp(ga, r.winner === 'attacker' ? 1 : 0.5);
+    if (involved && i.isPlayer(def) && K.autoPause && speed) { speed = 0; K.renderTime(); }
     a.units = U.copyUnits(r.attSurv);
     if (r.winner === 'attacker') {
       const ds = r.defSurv || U.zeroUnits();
@@ -175,7 +200,7 @@
       if (involved) i.news('fort', i.isPlayer(def) ? '#3c7a3a' : '#a83226', `${U.esc(p.name)} önünde ${i.nn(a.owner)} kuşatması kırıldı.`, '', true);
       retreat(a);
     }
-    if (!U.sumUnits(a.units)) removeArmy(a);
+    if (!U.sumUnits(a.units)) removeArmy(a, true);
     i.checkGameOver(); i.setDirty(); i.updatePanel(); i.updateTop();
   }
 
@@ -186,14 +211,17 @@
     if (involved) lock = true;
     const prov = P(a.prov) || P(b.prov) || G().provinces[0];
     let r;
-    try { r = await i.fight(a.owner, U.copyUnits(a.units), b.owner, U.copyUnits(b.units), prov, true); } finally { lock = false; a.busy = b.busy = false; }
+    const ga = i.genById(a.gen), gb = i.genById(b.gen);
+    try { r = await i.fight(a.owner, U.copyUnits(a.units), b.owner, U.copyUnits(b.units), prov, true, { att: i.genMult(ga, 'att', a.units), def: i.genMult(gb, 'def', b.units), attGen: ga, defGen: gb }); } finally { lock = false; a.busy = b.busy = false; }
     if (a.dead || b.dead) return;
     if (!r) { retreat(a, b); return; }
+    i.genXp(ga, r.winner === 'attacker' ? 1 : 0.5); i.genXp(gb, r.winner === 'defender' ? 1 : 0.5);
+    if (involved && i.isPlayer(b.owner) && K.autoPause && speed) { speed = 0; K.renderTime(); }
     a.units = U.copyUnits(r.attSurv); b.units = U.copyUnits(r.defSurv);
     const win = r.winner === 'attacker' ? a : b, lose = win === a ? b : a;
     if (involved) i.news('sword', i.isPlayer(win.owner) ? '#3c7a3a' : '#a83226', `${U.esc(prov.name)} yakınlarında ${i.nn(win.owner)} ordusu ${i.nn(lose.owner)} ordusunu bozguna uğrattı.`, '', true);
-    if (U.sumUnits(lose.units)) retreat(lose, win); else removeArmy(lose);
-    if (!U.sumUnits(win.units)) removeArmy(win);
+    if (U.sumUnits(lose.units)) { retreat(lose, win); lose.siege = null; } else removeArmy(lose, true);
+    if (!U.sumUnits(win.units)) removeArmy(win, true);
     win.cool = 1;
     i.updatePanel(); i.updateTop();
   }
@@ -203,7 +231,20 @@
     if (w.pid < 0) return;
     const p = P(w.pid);
     a.prov = w.pid;
-    if (hostile(a.owner, p.owner)) { a.wp = []; siege(a, p); return; }
+    if (hostile(a.owner, p.owner)) {
+      a.wp = [];
+      if (!U.sumUnits(p.units)) { siege(a, p); return; }
+      const i = I(), gen = i.genById(a.gen);
+      const cut = gen ? i.TRAITS[gen.trait].siege || 0 : 0;
+      const dk = i.DIFF[i.G().diff || 'normal'];
+      const days = Math.max(2, Math.round((4 + p.buildings.fort * 2 + (p.isCapital ? 4 : 0)) * (1 - cut) * (i.isPlayer(p.owner) ? dk.siege : 1)));
+      a.siege = { pid: p.id, left: days, total: days };
+      if (i.isPlayer(p.owner)) {
+        i.news('fort', '#a83226', `${i.nn(a.owner)} ordusu ${U.esc(p.name)} bölgesini kuşattı!`, `${days} gün içinde surlara saldıracak. Garnizonu güçlendir ya da kuşatmayı kır.`, true);
+        K.alert(`${i.nation(a.owner).name} ordusu ${p.name} bölgesini kuşattı — ${days} gün sonra saldıracak.`);
+      } else if (i.isPlayer(a.owner)) { UI.toast(`${U.esc(a.name)}, ${U.esc(p.name)} kuşatmasına başladı (${days} gün).`); LOL.audio.say('siege'); }
+      return;
+    }
     if (!a.wp.length && a.mergeHome && p.owner === a.owner && !I().isPlayer(a.owner)) mergeInto(a, p);
   }
   function moveAll(days) {
@@ -250,6 +291,11 @@
       if (!i.nation(a.owner).alive) { removeArmy(a); continue; }
       if (a.cool > 0) a.cool--;
       if (a.chase != null && !a.busy) chaseUpdate(a);
+      if (a.siege && !a.busy) {
+        const p = P(a.siege.pid);
+        if (!p || !hostile(a.owner, p.owner) || a.wp.length || Math.hypot(a.x - p.cx, a.y - p.cy) > 6 * scale()) a.siege = null;
+        else if (--a.siege.left <= 0) { a.siege = null; siege(a, p); if (lock) break; }
+      }
     }
     for (const n of g.nations) {
       if (!n.alive || i.isPlayer(n.id)) continue;
@@ -265,6 +311,7 @@
 
   function aiArmies(n) {
     const i = I(), me = n.id, sc = scale();
+    if (n.mobilizeUntil && i.absDay() < n.mobilizeUntil) return; // still mobilising after a declaration of war
     const wars = i.enemiesOf(me).map((x) => x.id);
     const mine = armies().filter((a) => a.owner === me && !a.busy);
     if (!wars.length) {
@@ -293,6 +340,7 @@
     }
     for (const a of mine) {
       if (a.dead) continue;
+      if (a.siege) continue;
       if (a.chase != null && byId(a.chase)) continue;
       const ap = i.powerOf(a.units, me);
       if (ap < 2.5) { if (!a.mergeHome) goHome(a); continue; }
@@ -388,7 +436,7 @@
     if (pid < 0) { UI.toast('Ordular denizde yürüyemez — kıyıya ya da bir deniz yolunun ucuna tıkla.', 'bad'); return; }
     const p = P(pid);
     if (!friendly(me, p.owner) && !hostile(me, p.owner) && !(await askWar(p.owner))) return;
-    a.chase = null;
+    a.chase = null; a.siege = null;
     if (!orderTo(a, pid, wx, wy)) { UI.toast('Oraya giden bir yol yok (barışta olduğun ülkelerin topraklarından geçilemez).', 'bad'); return; }
     LOL.audio.say(hostile(me, p.owner) ? 'attack' : 'move', domClass(a.units));
     if (!speed) K.setSpeed(1);
@@ -440,6 +488,8 @@
       <div class="pp-body">
       <div class="army-stat"><span>${tgt}${days ? ` · ~${days} gün` : ''}</span></div>
       <div class="army-stat"><span>Güç <b>${Math.round(i.powerOf(a.units, a.owner))}</b></span><span>Hız <b>${speedPx(a).toFixed(1)}</b>/gün</span><span>Konum <b>${p ? U.esc(p.name) : 'Deniz'}</b></span></div>
+      ${genCard(a, own)}
+      ${a.siege ? `<div class="army-stat"><span>⚔ Kuşatma: <b>${U.esc(P(a.siege.pid).name)}</b> — saldırıya <b>${a.siege.left}</b> gün</span></div><div class="prog"><i style="width:${(1 - a.siege.left / a.siege.total) * 100}%"></i></div>` : ''}
       <div class="units-row">${U.TYPES.filter((t) => a.units[t] > 0).map((t) => `<div class="ucard" title="${C.unitName[t]}: ${C.unitDesc[t]}"><img src="${UI.unitIcon(t, n.color)}"><div class="n">${a.units[t]}</div><div class="t">${C.unitShort[t]}</div></div>`).join('')}</div>`;
     if (own) {
       const inOwn = p && p.owner === me;
@@ -453,12 +503,63 @@
     }
     return html + '</div>';
   };
+  function genCard(a, own) {
+    const i = I(), g = i.genById(a.gen);
+    if (!g) return `<div class="gen-card empty"><div>Bu ordunun generali yok.</div>${own ? '<button data-act="army-gen">General Ata</button>' : ''}</div>`;
+    const t = i.TRAITS[g.trait];
+    const next = g.lvl < 5 ? i.GEN_XP[g.lvl] : null;
+    return `<div class="gen-card"><img src="${LOL.advisor.portrait(i.nation(g.owner).color, g.seed)}">
+      <div><div class="gen-name">${i.RANKS[g.lvl - 1]} ${U.esc(g.name)}</div><div class="gen-trait">${t.ad} — <small>${t.desc}</small></div>
+      <div class="gen-stars">${'★'.repeat(g.lvl)}${'☆'.repeat(5 - g.lvl)} ${next ? `<small>${Math.floor(g.xp)}/${next} tecrübe</small>` : '<small>en üst rütbe</small>'}</div></div>
+      ${own ? '<button data-act="army-gen" title="Generali değiştir">⇄</button>' : ''}</div>`;
+  }
+  K.generalDialog = async function (a) {
+    const i = I(), me = i.G().playerId, n = i.nation(me);
+    const list = () => i.generalsOf(me).sort((x, y) => y.lvl - x.lvl);
+    const row = (g) => {
+      const t = i.TRAITS[g.trait], arm = byId(g.army);
+      return `<tr><td><img class="gen-mini" src="${LOL.advisor.portrait(n.color, g.seed)}"></td><td><b>${i.RANKS[g.lvl - 1]} ${U.esc(g.name)}</b><br><small style="color:var(--muted)">${'★'.repeat(g.lvl)} · ${t.ad}: ${t.desc}</small></td>
+        <td>${arm ? U.esc(arm.name) : '<span class="peace">Boşta</span>'}</td><td>${g.army === a.id ? '<span class="tag gold">ATANDI</span>' : `<button data-gen="${g.id}">Ata</button>`}</td></tr>`;
+    };
+    const cost = 30 + list().length * 10;
+    const body = `<p class="hint" style="margin-top:0">${U.esc(a.name)} için bir general seç. Başka bir orduya atanmış generali seçersen o ordu generalsiz kalır.</p>
+      <table>${list().map(row).join('') || '<tr><td>Hiç generalin yok.</td></tr>'}</table>`;
+    await UI.modal('Generaller', body, [{ label: 'Generalsiz Bırak', value: 'none' }, { label: `Yeni General Ata (${cost} altın)`, value: 'hire', cls: 'primary', disabled: n.gold < cost }, { label: 'Kapat', value: null }], {
+      width: 640,
+      onMount: (wrap, close) => {
+        wrap.querySelectorAll('[data-gen]').forEach((b) => {
+          b.onclick = () => {
+            const g = i.genById(+b.dataset.gen);
+            const old = i.genById(a.gen);
+            if (old) old.army = null;
+            const prev = byId(g.army);
+            if (prev) prev.gen = null;
+            g.army = a.id; a.gen = g.id;
+            LOL.audio.play('click');
+            close('done');
+          };
+        });
+      },
+    }).then((v) => {
+      if (v === 'none') { const old = i.genById(a.gen); if (old) old.army = null; a.gen = null; }
+      if (v === 'hire' && n.gold >= cost) {
+        n.gold -= cost;
+        const old = i.genById(a.gen); if (old) old.army = null;
+        const g = i.makeGeneral(me);
+        g.army = a.id; a.gen = g.id;
+        UI.toast(`${i.RANKS[0]} <b>${U.esc(g.name)}</b> (${i.TRAITS[g.trait].ad}) orduya katıldı.`, 'good');
+        LOL.audio.play('coin');
+      }
+    });
+    i.updatePanel(); i.updateTop();
+  };
   K.action = async function (act) {
     const a = K.selectedArmy();
     if (act === 'army-close') { K.deselect(); return; }
     if (!a || !I().isPlayer(a.owner) || a.busy) return;
     const p = P(a.prov);
-    if (act === 'army-stop') { a.wp = []; a.chase = null; }
+    if (act === 'army-stop') { a.wp = []; a.chase = null; a.siege = null; }
+    else if (act === 'army-gen') { await K.generalDialog(a); }
     else if (act === 'army-follow') follow = !follow;
     else if (act === 'army-take' && p && p.owner === a.owner) { U.TYPES.forEach((t) => { a.units[t] += p.units[t]; p.units[t] = 0; }); LOL.audio.play('coin'); }
     else if (act === 'army-merge' && p && p.owner === a.owner) { mergeInto(a, p); UI.toast(`Ordu ${U.esc(p.name)} garnizonuna katıldı.`); }
@@ -524,6 +625,17 @@
     if (a.busy) {
       ctx.font = '16px sans-serif'; ctx.fillText('⚔', x, y - 30 * s);
     }
+    if (a.siege) {
+      const f = 1 - a.siege.left / a.siege.total;
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(x, y - 8 * s, 18 * s, 0, 7); ctx.stroke();
+      ctx.strokeStyle = '#ff6a50'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(x, y - 8 * s, 18 * s, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2); ctx.stroke();
+      ctx.font = `700 ${Math.round(9 * Math.min(1.3, s))}px Inter, sans-serif`;
+      ctx.fillStyle = '#ffb4a6'; ctx.fillText(`Kuşatma ${a.siege.left}g`, x, y - 30 * s);
+    }
+    const gen = i.genById(a.gen);
+    if (gen && i.cam().s > 1.2) { ctx.fillStyle = '#ffd860'; ctx.font = `${Math.round(8 * Math.min(1.3, s))}px sans-serif`; ctx.fillText('★'.repeat(gen.lvl), x - 14 * s, y + 4 * s); }
   }
   K.draw = function (ctx) {
     const i = I(), g = G();

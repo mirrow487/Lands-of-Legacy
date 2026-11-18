@@ -953,6 +953,7 @@
   function damage(t, amt, src) {
     if (t.dead) return;
     if (t.side === st.defSide && st.fort) amt *= 1 - 0.08 * st.fort;
+    if (t.side === 0 && st.time - (st.lastUnderfire || -99) > 18) { st.lastUnderfire = st.time; LOL.audio.say('underfire'); }
     t.hp -= amt;
     t.hitT = 0.12;
     // being shot while idle: retaliate
@@ -965,7 +966,7 @@
         if (nr > src.rank) {
           src.rank = nr; src.hp = Math.min(src.maxHp, src.hp + src.maxHp * 0.3);
           addP('promo', src.x, src.y, 30, { life: 1.4, vz: 14 });
-          if (src.side === 0) banner(nr === 2 ? 'Birlik ELİT rütbeye yükseldi!' : 'Birlik tecrübe kazandı!', 1.2);
+          if (src.side === 0) { banner(nr === 2 ? 'Birlik ELİT rütbeye yükseldi!' : 'Birlik tecrübe kazandı!', 1.2); LOL.audio.say('promote'); }
         }
       }
     }
@@ -973,6 +974,7 @@
 
   function kill(u) {
     u.dead = true;
+    if (u.side === 0 && st.time - (st.lastLost || -99) > 10) { st.lastLost = st.time; setTimeout(() => LOL.audio.say('lost'), 400); }
     st.sel.delete(u);
     if (isFoot(u)) {
       st.corpses.push({ type: 'inf', x: u.x, y: u.y, angle: u.angle, side: u.side, life: 12, max: 12 });
@@ -2040,6 +2042,7 @@
     };
     const title = outcome === 'win' ? 'ZAFER!' : outcome === 'retreat' ? 'GERİ ÇEKİLDİN' : 'YENİLGİ';
     LOL.audio.play(outcome === 'win' ? 'victory' : 'defeat');
+    setTimeout(() => LOL.audio.say(outcome === 'win' ? 'win' : outcome === 'retreat' ? 'retreat' : 'lose'), 900);
     LOL.audio.ambience(false);
     LOL.audio.weather(null);
     LOL.audio.music('strategy');

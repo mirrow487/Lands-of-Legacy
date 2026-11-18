@@ -353,19 +353,147 @@
     pick();
     speechSynthesis.onvoiceschanged = pick;
   }
-  const LINES = {
-    select: { inf: ['Komutanım?', 'Emrinizdeyiz.', 'Piyade hazır.', 'Dinliyoruz.'], tank: ['Zırhlı birlik hazır.', 'Tank komutanı dinliyor.', 'Motorlar çalışıyor.'], art: ['Topçu mevzide.', 'Koordinat bekliyoruz.', 'Toplar hazır.'] },
-    move: { inf: ['Emredersiniz!', 'İlerliyoruz!', 'Hemen!', 'Anlaşıldı!'], tank: ['Paletler dönüyor!', 'Yoldayız!', 'Tam gaz!'], art: ['Mevzi değiştiriyoruz.', 'Anlaşıldı, hareket.'] },
-    attack: { inf: ['Hücum!', 'Ateş serbest!', 'Saldırıya!'], tank: ['Hedef kilitlendi!', 'Ateş!', 'Ezin onları!'], art: ['Hedef koordinatları alındı!', 'Bombardıman başlıyor!', 'Ateş!'] },
+  // Voice lines. File name for a custom recording = id + .mp3/.ogg/.wav/.m4a
+  const CLS_TR = { inf: 'piyade', tank: 'zirhli', art: 'topcu' };
+  const CAT_TR = { select: 'sec', move: 'hareket', attack: 'saldiri' };
+  const RAW = {
+    select: {
+      inf: ['Komutanım?', 'Emrinizdeyiz.', 'Piyade hazır.', 'Dinliyoruz, komutanım.'],
+      tank: ['Zırhlı birlik hazır.', 'Tank komutanı dinliyor.', 'Motorlar çalışıyor.'],
+      art: ['Topçu mevzide.', 'Koordinat bekliyoruz.', 'Toplar hazır.'],
+    },
+    move: {
+      inf: ['Emredersiniz!', 'İlerliyoruz!', 'Hemen, komutanım!', 'Anlaşıldı, yola çıkıyoruz!'],
+      tank: ['Paletler dönüyor!', 'Yoldayız!', 'Tam gaz ileri!'],
+      art: ['Mevzi değiştiriyoruz.', 'Anlaşıldı, hareket ediyoruz.', 'Topları çekin, gidiyoruz!'],
+    },
+    attack: {
+      inf: ['Hücum!', 'Ateş serbest!', 'Süngü tak, saldırıya!', 'Vatan için, ileri!'],
+      tank: ['Hedef kilitlendi!', 'Ateş!', 'Ezin onları!'],
+      art: ['Hedef koordinatları alındı!', 'Bombardıman başlıyor!', 'Ateş!'],
+    },
   };
+  const EVENTS_V = {
+    atesaltinda: ['Ateş altındayız!', 'Sipere girin!', 'Bizi vuruyorlar, takviye lazım!'],
+    kayip: ['Bir birliğimizi kaybettik!', 'Adam vuruldu!', 'Kayıp verdik, komutanım!'],
+    zafer: ['Zafer bizimdir!', 'Düşman kaçıyor!', 'Mevzi bizim, komutanım!'],
+    yenilgi: ['Geri çekilin! Geri çekilin!', 'Hattı tutamıyoruz!'],
+    geri: ['Geri çekiliyoruz!', 'Emir alındı, çekiliyoruz.'],
+    terfi: ['Terfi için teşekkürler, komutanım!', 'Tecrübe kazandık!'],
+    kusatma: ['Kuşatma başladı!', 'Surları dövüyoruz!'],
+    savas: ['Savaş ilan edildi! Seferberlik başladı!', 'Düşman sınırı geçti!'],
+  };
+  const VOICE_LINES = [];
+  for (const cat in RAW) for (const cls in RAW[cat]) RAW[cat][cls].forEach((text, i) => VOICE_LINES.push({ id: `${CLS_TR[cls]}_${CAT_TR[cat]}_${i + 1}`, cat, cls, text }));
+  for (const ev in EVENTS_V) EVENTS_V[ev].forEach((text, i) => VOICE_LINES.push({ id: `olay_${ev}_${i + 1}`, cat: ev, cls: '*', text }));
+  A.VOICE_LINES = VOICE_LINES;
+  const EVENT_ALIAS = { underfire: 'atesaltinda', lost: 'kayip', win: 'zafer', lose: 'yenilgi', retreat: 'geri', promote: 'terfi', siege: 'kusatma', war: 'savas' };
+
+  // custom recordings: IndexedDB (imported files) + optional "voices/" folder next to the game
+  const custom = new Map(); // id -> object URL / relative URL
+  let db = null;
+  function openDB() {
+    return new Promise((res) => {
+      if (!('indexedDB' in window)) return res(null);
+      let rq;
+      try { rq = indexedDB.open('lol_voices', 1); } catch (e) { return res(null); }
+      rq.onupgradeneeded = () => rq.result.createObjectStore('v');
+      rq.onsuccess = () => res(rq.result);
+      rq.onerror = () => res(null);
+    });
+  }
+  async function loadCustom() {
+    db = await openDB();
+    if (db) {
+      await new Promise((res) => {
+        const tx = db.transaction('v', 'readonly'), st = tx.objectStore('v');
+        const rq = st.openCursor();
+        rq.onsuccess = () => { const c = rq.result; if (c) { custom.set(c.key, URL.createObjectURL(c.value)); c.continue(); } else res(); };
+        rq.onerror = () => res();
+      });
+    }
+    // probe the voices/ folder (works when the game is opened from its folder):
+    // check one marker file first so a missing folder costs a single request
+    const probe = (l, then) => {
+      const au = new Audio();
+      au.preload = 'metadata';
+      au.onloadedmetadata = () => { if (!custom.has(l.id)) custom.set(l.id, 'voices/' + l.id + '.mp3'); if (then) then(); };
+      au.src = 'voices/' + l.id + '.mp3';
+    };
+    probe(VOICE_LINES[0], () => VOICE_LINES.slice(1).forEach((l) => { if (!custom.has(l.id)) probe(l); }));
+  }
+  setTimeout(loadCustom, 500);
+  A.customCount = () => custom.size;
+  A.importVoices = async function (files) {
+    if (!db) db = await openDB();
+    let ok = 0; const bad = [];
+    const ids = new Set(VOICE_LINES.map((l) => l.id));
+    for (const f of files) {
+      const id = f.name.replace(/\.[^.]+$/, '').toLowerCase().trim();
+      if (!ids.has(id)) { bad.push(f.name); continue; }
+      if (db) await new Promise((res) => { const tx = db.transaction('v', 'readwrite'); tx.objectStore('v').put(f, id); tx.oncomplete = res; tx.onerror = res; });
+      custom.set(id, URL.createObjectURL(f));
+      ok++;
+    }
+    return { ok, bad };
+  };
+  A.clearVoices = async function () {
+    custom.clear();
+    if (!db) db = await openDB();
+    if (db) await new Promise((res) => { const tx = db.transaction('v', 'readwrite'); tx.objectStore('v').clear(); tx.oncomplete = res; tx.onerror = res; });
+  };
+  A.scriptText = function () {
+    const head = 'LANDS OF LEGACY — ASKER REPLİKLERİ\n\nHer repliği ayrı bir ses dosyası olarak kaydet ve dosyaya soldaki kodu ad olarak ver (ör. piyade_sec_1.mp3).\nDesteklenen biçimler: mp3, ogg, wav, m4a. Telsiz havası için kısa (1-2 sn) ve net kayıtlar en iyisidir.\nDosyaları oyunda Ayarlar > Asker Sesleri > "Ses Dosyalarını Yükle" ile seç; ya da oyunun yanına "voices" klasörü açıp mp3 olarak koy.\n\n';
+    let out = head;
+    const groups = [['inf', 'PİYADE (piyade, makineli tüfek, tanksavar)'], ['tank', 'ZIRHLI BİRLİKLER (tank, ağır tank, keşif)'], ['art', 'TOPÇU (topçu, roket topçusu)'], ['*', 'OLAYLAR (savaş alanı ve harita)']];
+    const catName = { select: 'Seçilince', move: 'Hareket emri', attack: 'Saldırı emri' };
+    for (const [cls, title] of groups) {
+      out += '\n== ' + title + ' ==\n';
+      let lastCat = '';
+      for (const l of VOICE_LINES.filter((x) => x.cls === cls)) {
+        if (cls !== '*' && l.cat !== lastCat) { out += '  -- ' + catName[l.cat] + ' --\n'; lastCat = l.cat; }
+        out += '  ' + l.id.padEnd(26) + l.text + '\n';
+      }
+    }
+    out += `\nToplam ${VOICE_LINES.length} replik. Hepsini kaydetmek zorunda değilsin: kaydettiklerin çalar, eksik olanlar için o an ses çıkmaz.\n`;
+    return out;
+  };
+  A.downloadScript = function () {
+    const blob = new Blob([A.scriptText()], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'asker-replikleri.txt';
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+
+  let lastAudio = null;
+  function playCustom(url) {
+    try {
+      if (lastAudio) { lastAudio.pause(); }
+      const au = new Audio(url);
+      au.volume = Math.min(1, A.vol.master * A.vol.sfx);
+      au.play().catch(() => {});
+      lastAudio = au;
+      return true;
+    } catch (e) { return false; }
+  }
+  // kind: select | move | attack | or an event (underfire, lost, win, lose, retreat, promote, siege, war)
   A.say = function (kind, utype) {
-    A.play('radio');
-    if (!A.voice || !A.enabled || !trVoice || !('speechSynthesis' in window)) return;
+    if (!A.enabled) return;
+    const ev = EVENT_ALIAS[kind] || (EVENTS_V[kind] ? kind : null);
+    if (utype && LOL.config && LOL.config.techClass[utype]) utype = LOL.config.techClass[utype];
+    if (!ev) A.play('radio');
+    if (!A.voice) return;
     const now = performance.now();
-    if (now - lastSay < 1100) return;
+    if (now - lastSay < (ev ? 2500 : 1100)) return;
+    const pool = ev ? VOICE_LINES.filter((l) => l.cat === ev) : VOICE_LINES.filter((l) => l.cat === kind && l.cls === (utype || 'inf'));
+    if (!pool.length) return;
+    // prefer lines that have a custom recording
+    const rec = pool.filter((l) => custom.has(l.id));
+    if (rec.length) { lastSay = now; playCustom(custom.get(rec[Math.floor(Math.random() * rec.length)].id)); return; }
+    if (custom.size || !trVoice || !('speechSynthesis' in window)) return; // a voice pack is loaded: stay silent for missing lines
     lastSay = now;
-    const arr = (LINES[kind] || LINES.move)[utype || 'inf'] || LINES.move.inf;
-    const u = new SpeechSynthesisUtterance(arr[Math.floor(Math.random() * arr.length)]);
+    const line = pool[Math.floor(Math.random() * pool.length)];
+    const u = new SpeechSynthesisUtterance(line.text);
     u.voice = trVoice; u.lang = trVoice.lang; u.rate = 1.15; u.pitch = utype === 'tank' ? 0.7 : 0.85;
     u.volume = Math.min(1, A.vol.master * A.vol.sfx * 0.9);
     speechSynthesis.cancel();

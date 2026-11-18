@@ -60,6 +60,7 @@
     return url;
   }
 
+  A.portrait = (color, seed) => portrait(color, seed);
   // ---------------- rule-based tips ----------------
   A.refresh = function () {
     const st = LOL.strategy.analysis && LOL.strategy.analysis();

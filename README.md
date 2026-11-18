@@ -4,6 +4,11 @@ Tarayıcıda çalışan bir büyük strateji + gerçek zamanlı taktik savaş oy
 
 - **İki harita:** Gerçek dünya (1936, 165 ülke; istediğin ülkeyi seç) ya da Azgaar tarzı hayali dünya (yükselti, biyomlar, nehirler, dağ ve orman simgeleri).
 - **Sefer haritası (Bannerlord tarzı):** Zaman sürekli akar (duraklat / 1x / 2x / 4x). Garnizonlardan ordu kurulur; ordular bayraklarıyla haritada yürür, düşman bölgelerini kuşatır ve düşman ordularıyla meydan muharebesine girer. Yapay zekâ orduları da haritada dolaşır.
+- **Tarihî senaryolar:** 1936 Fırtına Öncesi, 1939 Avrupa'da Savaş, 1941 Doğu Cephesi (büyük güçler, başlangıç savaşları ve ittifaklarıyla); üç zorluk seviyesi.
+- **Generaller:** Özellikli (saldırgan, savunma ustası, kuşatma uzmanı, yıldırım harekâtı, zırh/topçu ustası, lojistikçi) ve savaştıkça terfi eden generaller ordulara atanır.
+- **Ansiklopedi (E):** Tüm ulusların gücü, sana göre kıyası, ilişkin, orduları, generalleri, teknolojileri ve diplomasisi; birlik değerleri ve senaryo bilgisi.
+- **Denge:** Kuşatmalar gün sürer, savaş ilanından sonra seferberlik süresi vardır; sana savaş açılınca ya da bir bölgen kuşatılınca oyun kendiliğinden durur.
+- **Asker sesleri:** `docs/asker-replikleri.txt` listesindeki replikleri kaydedip Ayarlar > Asker Sesleri'nden yükleyebilir ya da `voices/` klasörüne koyabilirsin.
 - **Danışman:** Her ay durumu değerlendirip öneri veren baş danışman. Ayarlar > Yapay Zekâ bölümünden herkes kendi **Gemini** ya da **Claude** API anahtarını bağlarsa danışman oyunun anlık durumunu görerek sorulara yanıt verir (anahtar yalnızca o tarayıcıda saklanır).
 - **Büyük strateji:** Her oyunda yeniden üretilen dünya, 8 ulus (kendi bayrakları ve liderleriyle), aylık takvim (1936'dan başlar), hazine / insan gücü / istikrar / araştırma, binalar (fabrika, tahkimat, kışla), 15 teknoloji, ittifaklar ve ilişkiler, seçimli rastgele olaylar, Dünya Gazetesi haber akışı ve 5 harita modu.
 - **8 birlik türü:** Piyade, Makineli Tüfek, Tanksavar, Zırhlı Keşif, Tank, Ağır Tank, Topçu, Roket Topçusu.

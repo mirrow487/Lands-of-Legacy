@@ -240,6 +240,8 @@
     coin: '<circle cx="12" cy="12" r="8" fill="currentColor"/>',
     tree: '<path d="M12 2l6 9h-3l4 6H5l4-6H6z" fill="currentColor"/><rect x="11" y="17" width="2" height="5" fill="currentColor"/>',
     army: '<path d="M4 18l8-12 8 12z" fill="currentColor"/>',
+    book: '<path d="M4 4h7a2 2 0 012 2v14a2 2 0 00-2-2H4zM20 4h-7a2 2 0 00-2 2v14a2 2 0 012-2h7z" fill="none" stroke="currentColor" stroke-width="2"/>',
+    star: '<path d="M12 2l3 7 7 .6-5.3 4.7 1.6 7.2L12 17.8 5.7 21.5l1.6-7.2L2 9.6 9 9z" fill="currentColor"/>',
     next: '<path d="M6 4l10 8-10 8z" fill="currentColor"/><rect x="17" y="4" width="3" height="16" fill="currentColor"/>',
   };
   UI.icon = (name, size, color) => `<svg class="ico" width="${size || 18}" height="${size || 18}" viewBox="0 0 24 24" style="${color ? 'color:' + color : ''}">${P[name] || ''}</svg>`;

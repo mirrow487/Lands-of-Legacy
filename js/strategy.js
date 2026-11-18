@@ -40,6 +40,18 @@
   const FIRST = ['Viktor', 'Aldric', 'Kerem', 'Osric', 'Leon', 'Mirza', 'Anton', 'Erhan', 'Dorian', 'Selim', 'Konrad', 'Tarık', 'Elias', 'Baran', 'Henrik', 'Cem'];
   const LAST = ['Valder', 'Morrow', 'Karaman', 'Steiner', 'Draven', 'Aksoy', 'Holm', 'Varga', 'Erol', 'Brandt', 'Tuna', 'Novak', 'Kral', 'Ferro'];
 
+  const TRAITS = {
+    saldirgan: { ad: 'Saldırgan', desc: 'Saldırırken +%15 güç', att: 0.15 },
+    savunmaci: { ad: 'Savunma Ustası', desc: 'Saldırıya uğrayınca +%20 güç', def: 0.2 },
+    kusatma: { ad: 'Kuşatma Uzmanı', desc: 'Kuşatmalar %40 kısa, kuşatma saldırısında +%15', siege: 0.4, siegeAtt: 0.15 },
+    hizli: { ad: 'Yıldırım Harekâtı', desc: 'Ordu %30 daha hızlı', speed: 0.3 },
+    zirh: { ad: 'Zırh Komutanı', desc: 'Zırhlı birlikler +%25 güç', armor: 0.25 },
+    topcu: { ad: 'Topçu Ustası', desc: 'Topçu birlikleri +%25 güç', artil: 0.25 },
+    lojistik: { ad: 'Lojistikçi', desc: 'Ordu bakımı -%40, hız +%10', upkeep: 0.4, speed: 0.1 },
+  };
+  const RANKS = ['Tuğgeneral', 'Tümgeneral', 'Korgeneral', 'Orgeneral', 'Mareşal'];
+  const GEN_XP = [0, 2, 5, 9, 14];
+  const DIFF = { kolay: { ad: 'Kolay', ai: 0.85, war: 0.35, mob: 20, siege: 1.5 }, normal: { ad: 'Normal', ai: 1, war: 0.7, mob: 12, siege: 1 }, zor: { ad: 'Zor', ai: 1.15, war: 1, mob: 6, siege: 0.75 } };
   let map = null, G = null;
   let mapCanvas = null, mapCtx = null, img = null, selCanvas = null;
   let cam = { x: 0, y: 0, s: 1 };
@@ -102,7 +114,11 @@
       mp += p.pop * 3 * (1 + p.buildings.bar * 0.3);
       U.TYPES.forEach((t) => { up += p.units[t] * C.upkeep[t]; });
     });
-    (G.armies || []).forEach((a) => { if (a.owner === nid) U.TYPES.forEach((t) => { up += a.units[t] * C.upkeep[t] * 1.2; }); });
+    (G.armies || []).forEach((a) => {
+      if (a.owner !== nid) return;
+      const g = genById(a.gen), lo = g && TRAITS[g.trait].upkeep ? 1 - TRAITS[g.trait].upkeep : 1;
+      U.TYPES.forEach((t) => { up += a.units[t] * C.upkeep[t] * 1.2 * lo; });
+    });
     const stabM = 0.7 + 0.6 * n.stability / 100;
     inc *= (1 + (e.income || 0)) * stabM;
     mp *= (1 + (e.manpower || 0)) * (0.6 + 0.8 * n.stability / 100);
@@ -113,12 +129,76 @@
   // ---------------------------------------------------------------- setup
   S.init = function () { canvas = LOL.app.canvas; ctx = LOL.app.ctx; };
 
-  S.newMap = function (seed, kind) {
+  function makeGeneral(owner, rng, lvl) {
+    const r = rng || U.rng((Math.random() * 1e9) >>> 0);
+    const g = { id: G.nextGenId++, owner, name: r.pick(FIRST) + ' ' + r.pick(LAST), trait: r.pick(Object.keys(TRAITS)), lvl: lvl || 1, xp: GEN_XP[(lvl || 1) - 1], army: null, alive: true, wins: 0, seed: r.int(1, 1e6) };
+    G.generals.push(g);
+    return g;
+  }
+  const generalsOf = (nid) => G.generals.filter((g) => g.alive && g.owner === nid);
+  const genById = (id) => (id == null ? null : G.generals.find((g) => g.id === id && g.alive) || null);
+  // combat multiplier from a general for given units and role ('att' | 'def' | 'siege')
+  function genMult(gen, role, units) {
+    if (!gen) return 1;
+    const t = TRAITS[gen.trait] || {};
+    let m = 1 + (gen.lvl - 1) * 0.05;
+    if (role === 'att' || role === 'siege') m += t.att || 0;
+    if (role === 'def') m += t.def || 0;
+    if (role === 'siege') m += t.siegeAtt || 0;
+    if (t.armor || t.artil) {
+      const tot = Math.max(0.01, U.power(units));
+      let arm = 0, art = 0;
+      U.TYPES.forEach((k) => { const p = units[k] * C.power[k]; if (C.techClass[k] === 'tank') arm += p; if (C.techClass[k] === 'art') art += p; });
+      m += (t.armor || 0) * arm / tot + (t.artil || 0) * art / tot;
+    }
+    return m;
+  }
+  function genXp(gen, amount) {
+    if (!gen) return;
+    gen.xp += amount;
+    while (gen.lvl < 5 && gen.xp >= GEN_XP[gen.lvl]) {
+      gen.lvl++;
+      if (isPlayer(gen.owner)) { UI.toast(`General <b>${U.esc(gen.name)}</b> terfi etti: ${RANKS[gen.lvl - 1]}!`, 'good'); LOL.audio.say('promote', 'inf'); }
+    }
+  }
+  const absDay = () => G.turn * 30 + (G.day || 0);
+
+  function applyScenario(id, rng) {
+    const sc = (LOL.SCENARIOS || {})[id];
+    if (!sc) return;
+    const byEn = (en) => G.nations.find((n) => n.en === en);
+    G.turn = (sc.yil - 1936) * 12 + sc.ay;
+    for (const en in sc.gp) {
+      const n = byEn(en), g = sc.gp[en];
+      if (!n) continue;
+      n.gold = Math.round(LOL.config.startGold * (g.gold || 1));
+      if (g.stab) n.stability = g.stab;
+      n.techs = (g.techs || []).filter((t) => TECH[t]);
+      n.great = true;
+      provsOf(n.id).forEach((p) => {
+        const m = g.army || 1;
+        p.units.inf = Math.round(p.units.inf * m);
+        p.units.tank = Math.round(p.units.tank * m + (m > 1.5 ? 1 : 0));
+        p.units.art = Math.round(p.units.art * m + (m > 2 ? 1 : 0));
+        if (m > 1.5) p.units.mg += 1;
+        if (n.techs.includes('tank2') && m > 2.5 && p.isCapital) p.units.heavy += 2;
+        if (m > 1.7) p.buildings.fort = Math.max(p.buildings.fort, p.isCapital ? 2 : 0);
+        if (m > 1.5) p.buildings.fac = Math.max(p.buildings.fac, p.isCapital ? 2 : 1);
+      });
+    }
+    const pair = (a, b) => { const na = byEn(a), nb = byEn(b); return na && nb ? [na.id, nb.id] : null; };
+    sc.wars.forEach(([a, b]) => { const p = pair(a, b); if (p) { G.wars.add(key(p[0], p[1])); G.rel[key(p[0], p[1])] = -70; } });
+    sc.alliances.forEach(([a, b]) => { const p = pair(a, b); if (p) { G.allies.add(key(p[0], p[1])); G.rel[key(p[0], p[1])] = 75; } });
+    sc.truces.forEach(([a, b, m]) => { const p = pair(a, b); if (p) G.truce[key(p[0], p[1])] = G.turn + m; });
+  }
+
+  S.newMap = function (seed, kind, opts) {
+    opts = opts || {};
     map = kind === 'world' ? LOL.mapgen.generateWorld(seed) : LOL.mapgen.generate(seed, 8);
     if (LOL.campaign) LOL.campaign.reset();
     S.mapKind = map.kind;
     const rng = U.rng(seed + 5);
-    G = { seed, kind: map.kind, turn: 1, day: 0, armies: [], nextArmyId: 1, playerId: -1, nations: map.nations, provinces: map.provinces, wars: new Set(), allies: new Set(), truce: {}, rel: {}, news: [], eventsSeen: {} };
+    G = { seed, kind: map.kind, scenario: map.kind === 'world' ? (opts.scenario || '1936') : null, diff: opts.diff || 'normal', generals: [], nextGenId: 1, turn: 1, day: 0, armies: [], nextArmyId: 1, playerId: -1, nations: map.nations, provinces: map.provinces, wars: new Set(), allies: new Set(), truce: {}, rel: {}, news: [], eventsSeen: {} };
     G.nations.forEach((n) => {
       const gov = rng.pick(GOVS);
       n.advisor = rng.pick(['Orgeneral', 'Mareşal', 'Amiral', 'Kurmay Albay']) + ' ' + rng.pick(FIRST) + ' ' + rng.pick(LAST);
@@ -126,6 +206,11 @@
     });
     if (map.kind !== 'world') for (let a = 0; a < G.nations.length; a++) for (let b = a + 1; b < G.nations.length; b++) G.rel[key(a, b)] = rng.int(-25, 30);
     else map.provinces.forEach((p) => p.neighbors.forEach((q) => { const a = p.owner, b = map.provinces[q].owner; if (a !== b && G.rel[key(a, b)] == null) G.rel[key(a, b)] = rng.int(-25, 30); }));
+    if (G.scenario) applyScenario(G.scenario, rng);
+    G.nations.forEach((n) => {
+      const k = n.great ? 4 : provsOf(n.id).length >= 6 ? 3 : 2;
+      for (let i = 0; i < k; i++) makeGeneral(n.id, rng, n.great && i === 0 ? 3 : i === 0 ? 2 : 1);
+    });
     nationRGB = G.nations.map((n) => U.hexToRgb(n.color));
     mapCanvas = document.createElement('canvas'); mapCanvas.width = map.W; mapCanvas.height = map.H;
     mapCtx = mapCanvas.getContext('2d');
@@ -143,7 +228,7 @@
     ['endturn-wrap', 'news', 'mapmodes'].forEach((id) => U.el(id).classList.toggle('hidden', !playing));
     U.el('busy').classList.toggle('hidden', !(p === 'busy' && showBusy));
     U.el('tb-res').classList.toggle('hidden', !playing);
-    ['btn-diplo', 'btn-save', 'btn-tech'].forEach((id) => { U.el(id).disabled = p !== 'play'; });
+    ['btn-diplo', 'btn-save', 'btn-tech', 'btn-ency'].forEach((id) => { U.el(id).disabled = p !== 'play'; });
     updatePanel(); updateTop();
   };
   S.getPhase = () => phase;
@@ -518,7 +603,9 @@
       hover = -1;
     } else if (type === 'keydown') {
       if (e.key === 'Escape') { sel = -1; LOL.campaign.deselect(); dirty = true; updatePanel(); }
-      if (phase === 'play' && !UI.isModalOpen()) LOL.campaign.key(e);
+      if (phase === 'play' && !UI.isModalOpen()) {
+        if (e.key === 'e' || e.key === 'E') LOL.encyclopedia.open(); else LOL.campaign.key(e);
+      }
     }
   };
 
@@ -567,6 +654,8 @@
     G.wars.add(key(a, b));
     G.allies.delete(key(a, b));
     addRel(a, b, -60);
+    if (!isPlayer(a)) nation(a).mobilizeUntil = absDay() + DIFF[G.diff || 'normal'].mob;
+    if (isPlayer(b) && LOL.campaign) LOL.campaign.alert(`${nation(a).name} sana savaş açtı! Orduları ${DIFF[G.diff || 'normal'].mob} gün içinde harekete geçecek.`);
     const involved = isPlayer(a) || isPlayer(b);
     if (involved || map.kind !== 'world' || (major(a) && major(b))) news('sword', '#b33a2a', `${nn(a)}, ${nn(b)} ulusuna savaş ilan etti!`, involved ? 'Cepheler alevlendi. Ordular sınırda.' : '', involved);
     if (involved && !silent) LOL.audio.play('war');
@@ -681,17 +770,21 @@
 
   // Resolve a battle. prov = province where it happens (siege if !field).
   // Returns null if the player cancels, otherwise {winner, attSurv, defSurv, retreated}.
-  async function fight(owner, units, defender, defUnits, prov, field) {
+  async function fight(owner, units, defender, defUnits, prov, field, gm) {
+    gm = gm || {};
     const playerInvolved = isPlayer(owner) || isPlayer(defender);
     const place = field ? `${prov.name} yakınları` : prov.name;
-    const dB = field ? 1.05 : defBonus(prov);
+    const dk = DIFF[G.diff || 'normal'].ai;
+    const aM = (gm.att || 1) * (isPlayer(defender) ? dk : 1), dM = (gm.def || 1) * (isPlayer(owner) ? dk : 1);
+    const dB = (field ? 1.05 : defBonus(prov)) * dM / aM;
     if (!playerInvolved) {
       const fake = field ? { isCapital: false, buildings: { fort: 0 }, owner: defender } : prov;
       return autoResolveB(units, defUnits, owner, defender, dB, fake);
     }
     const pAtt = isPlayer(owner);
-    const A = powerOf(units, owner), D = powerOf(defUnits, defender) * dB;
+    const A = powerOf(units, owner) * aM, D = powerOf(defUnits, defender) * dB * aM;
     const pa = A / (A + D);
+    const genLine = (g) => (g ? `<small>⭐ ${RANKS[g.lvl - 1]} ${U.esc(g.name)} · ${TRAITS[g.trait].ad}</small>` : '');
     const myShare = pAtt ? pa : 1 - pa;
     const odds = myShare > 0.68 ? 'Çok yüksek' : myShare > 0.55 ? 'Yüksek' : myShare > 0.45 ? 'Dengeli' : myShare > 0.32 ? 'Düşük' : 'Çok düşük';
     const banner = `<div class="banner"><div class="bg" style="background:linear-gradient(120deg, ${U.shade(nation(owner).color, -0.4)}, #1a0c08 45%, #1a0c08 55%, ${U.shade(nation(defender).color, -0.4)})"></div>
@@ -699,6 +792,7 @@
     const body = `<div class="vs">${sideCard(nation(owner), units, 'Saldıran')}<div class="mid">VS</div>${sideCard(nation(defender), defUnits, field ? `Savunan · ${prov.terrain}` : `Savunan · ${prov.terrain}${prov.buildings.fort ? ' · Tahkimat ' + prov.buildings.fort : ''}${prov.isCapital ? ' · Başkent' : ''}`)}</div>
       <div class="odds"><div class="ob"><div style="width:${pa * 100}%;background:${nation(owner).color}"></div><div style="flex:1;background:${nation(defender).color}"></div></div>
       <div class="ol"><span>Kuvvet ${Math.round(A)}</span><span>Zafer şansın: <b style="color:var(--text)">${odds}</b></span><span>${Math.round(D)} Kuvvet</span></div></div>
+      ${gm.attGen || gm.defGen ? `<div class="ol" style="margin-top:6px">${genLine(gm.attGen) || '<small>Generalsiz</small>'}${genLine(gm.defGen) || '<small>Generalsiz</small>'}</div>` : ''}
       <p class="hint">"<b>Savaşı Yönet</b>" ile izometrik savaş alanına inip birliklerine bizzat komuta edersin.</p>`;
     const btns = [{ label: 'Otomatik Çöz', value: 'auto' }, { label: '⚔ Savaşı Yönet', value: 'tactical', cls: 'primary' }];
     if (pAtt) btns.unshift({ label: 'Geri Çekil', value: 'cancel' });
@@ -712,7 +806,7 @@
         fort: field ? 0 : Math.round(prov.buildings.fort * (1 + (eff(defender).fort || 0))),
         attacker: nation(owner), defender: nation(defender),
         attUnits: U.copyUnits(units), defUnits: U.copyUnits(defUnits),
-        attEff: eff(owner), defEff: eff(defender),
+        attEff: boostEff(eff(owner), aM), defEff: boostEff(eff(defender), dM),
         playerSide: pAtt ? 'attacker' : 'defender',
         seed: (G.seed * 31 + prov.id * 7919 + G.turn * 131 + (G.day || 0) * 17) >>> 0,
       });
@@ -730,6 +824,11 @@
       [{ label: 'Devam', value: 1, cls: 'primary' }], { cls: win ? 'win' : 'lose' });
     }
     return result;
+  }
+  function boostEff(e, m) {
+    const o = Object.assign({}, e);
+    if (m && m !== 1) ['inf', 'tank', 'art'].forEach((k) => { o[k + 'Dmg'] = (o[k + 'Dmg'] || 0) + (m - 1); });
+    return o;
   }
   function autoResolveB(att, def, an, dn, dB) {
     const A = powerOf(att, an) * (0.85 + Math.random() * 0.3);
@@ -849,7 +948,7 @@
       for (const o of cands) {
         let r = (nationPower(o) + alliesOf(o).reduce((s, a) => s + nationPower(a.id) * 0.5, 0)) / Math.max(1, myPow);
         r *= 1 + Math.max(0, rel(me, o)) / 60;
-        if (isPlayer(o)) r *= 0.9 + Math.random() * 0.3;
+        if (isPlayer(o)) { if (Math.random() > DIFF[G.diff || 'normal'].war) continue; r *= 0.9 + Math.random() * 0.3; }
         if (r < br) { br = r; best = o; }
       }
       if (best >= 0 && br < 1.1) {
@@ -1022,7 +1121,7 @@
     if (!own) tag = atWar(me, p.owner) ? '<span class="tag war">SAVAŞ</span>' : allied(me, p.owner) ? '<span class="tag ally">MÜTTEFİK</span>' : truce(me, p.owner) ? '<span class="tag peace">ATEŞKES</span>' : '<span class="tag">BARIŞ</span>';
     const head = `<div class="pp-head"><div class="tint" style="background:${n.color}"></div><button class="pp-close" data-act="close">×</button>
       <div class="pp-title">${U.esc(p.name)}${p.isCapital ? ' <span style="color:#ffd860">★</span>' : ''}</div>
-      <div class="pp-sub">${UI.flag(n, 14)}${U.esc(n.name)} ${tag} <span class="tag gold">${p.terrain}</span></div></div>`;
+      <div class="pp-sub"><a href="#" class="nat-link" data-act="ency" data-n="${n.id}">${UI.flag(n, 14)}${U.esc(n.name)}</a> ${tag} <span class="tag gold">${p.terrain}</span></div></div>`;
     const tabs = own ? ['genel', 'ordu', 'insa'] : ['genel'];
     if (!tabs.includes(selTab)) selTab = 'genel';
     const tabNames = { genel: 'Genel', ordu: 'Ordu', insa: 'İnşaat' };
@@ -1075,6 +1174,7 @@
 
   async function panelAction(act, target, e) {
     if (act === 'start') { startGame(P(sel).owner); return; }
+    if (act === 'ency') { e.preventDefault(); LOL.encyclopedia.open(+target.dataset.n); return; }
     if (act.startsWith('army-')) { await LOL.campaign.action(act, target); updatePanel(); updateTop(); return; }
     if (act === 'form' && sel >= 0) {
       const p = P(sel), u = clampSend(p);
@@ -1211,7 +1311,12 @@
       <div class="slider-row"><span>Müzik</span><input type="range" min="0" max="100" value="${A.vol.music * 100}" data-v="music"><b>${Math.round(A.vol.music * 100)}</b></div>
       <div class="slider-row"><span>Efektler</span><input type="range" min="0" max="100" value="${A.vol.sfx * 100}" data-v="sfx"><b>${Math.round(A.vol.sfx * 100)}</b></div>
       <div class="slider-row"><span>Ses açık</span><input type="checkbox" id="set-en" ${A.enabled ? 'checked' : ''}><span></span></div>
-      <div class="slider-row"><span>Telsiz sesleri</span><input type="checkbox" id="set-voice" ${A.voice ? 'checked' : ''}><span class="hint" style="margin:0">${A.hasVoice() ? '' : 'Tarayıcında Türkçe ses yok'}</span></div>`;
+      <div class="slider-row"><span>Telsiz sesleri</span><input type="checkbox" id="set-voice" ${A.voice ? 'checked' : ''}><span class="hint" style="margin:0">${A.customCount() ? A.customCount() + ' özel ses yüklü' : A.hasVoice() ? 'Tarayıcı sesi' : 'Tarayıcında Türkçe ses yok'}</span></div>
+      <div class="slider-row"><span>Otomatik duraklat</span><input type="checkbox" id="set-pause" ${LOL.campaign.autoPause ? 'checked' : ''}><span class="hint" style="margin:0">Savaş ilanı ve kuşatmada oyunu durdur</span></div>
+      <div class="sect-title">Asker Sesleri (Ses Paketi)</div>
+      <p class="hint" style="margin-top:0">Kendi kaydettiğin replikleri yükle. Dosya adı replik kodu olmalı (ör. <b>piyade_sec_1.mp3</b>). Yüklenen sesler tarayıcı sesinin yerine çalar.</p>
+      <div class="btnrow"><label class="filebtn">📂 Ses Dosyalarını Yükle<input type="file" id="set-voices" accept="audio/*" multiple hidden></label><button id="set-script">📜 Replik Listesini İndir</button><button id="set-vclear">Temizle</button></div>
+      <div id="set-vmsg" class="hint"></div>`;
     UI.modal('Ayarlar', `<div class="sect-title" style="margin-top:0">Ses</div>${body}<div class="sect-title">Yapay Zekâ Danışman</div>
       <p class="hint" style="margin-top:0">Danışmanla sohbet için kendi Gemini ya da Claude API anahtarını bağla.</p>
       <button class="primary" id="set-ai" style="width:100%">🔑 Yapay Zekâ Ayarları (API Anahtarı)</button>`, [{ label: 'Tamam', value: 0, cls: 'primary' }], {
@@ -1223,6 +1328,15 @@
         });
         wrap.querySelector('#set-en').onchange = (e) => { A.enabled = e.target.checked; A.applyVolumes(); A.saveSettings(); };
         wrap.querySelector('#set-voice').onchange = (e) => { A.voice = e.target.checked; A.saveSettings(); };
+        wrap.querySelector('#set-pause').onchange = (e) => { LOL.campaign.autoPause = e.target.checked; try { localStorage.setItem('lol_autopause', e.target.checked ? '1' : '0'); } catch (er) { /* ignore */ } };
+        const vmsg = wrap.querySelector('#set-vmsg');
+        wrap.querySelector('#set-voices').onchange = async (e) => {
+          vmsg.textContent = 'Yükleniyor...';
+          const r = await A.importVoices([...e.target.files]);
+          vmsg.innerHTML = `<span style="color:var(--good)">✔ ${r.ok} ses yüklendi.</span>${r.bad.length ? ` <span style="color:#e8c050">Tanınmayan dosyalar: ${r.bad.slice(0, 6).map(U.esc).join(', ')}${r.bad.length > 6 ? '…' : ''}</span>` : ''}`;
+        };
+        wrap.querySelector('#set-script').onclick = () => A.downloadScript();
+        wrap.querySelector('#set-vclear').onclick = async () => { await A.clearVoices(); vmsg.textContent = 'Özel sesler silindi.'; };
         wrap.querySelector('#set-ai').onclick = () => { wrap.querySelector('.modal-btns button').click(); setTimeout(() => LOL.advisor.openSettings(), 160); };
       },
     });
@@ -1232,6 +1346,9 @@
   function startGame(nid) {
     G.playerId = nid;
     G.news = [];
+    G.diff = U.el('pb-diff') ? U.el('pb-diff').value : G.diff;
+    // scenario wars against the player start with a mobilisation period
+    G.nations.forEach((o) => { if (o.id !== nid && atWar(o.id, nid)) o.mobilizeUntil = absDay() + DIFF[G.diff || 'normal'].mob; });
     LOL.campaign.reset();
     if (LOL.advisor) LOL.advisor.reset();
     const n = nation(nid);
@@ -1255,7 +1372,16 @@
 
   S.startPick = function (kind) {
     S.pickKind = kind || S.pickKind || 'world';
-    S.newMap((Math.random() * 1e9) >>> 0, S.pickKind);
+    const scSel = U.el('pb-scen');
+    if (!scSel.options.length) {
+      scSel.innerHTML = (LOL.SCENARIO_ORDER || []).map((k) => `<option value="${k}">${U.esc(LOL.SCENARIOS[k].ad)}</option>`).join('');
+      scSel.onchange = () => { LOL.audio.play('click'); U.el('pick-banner').classList.add('loading'); setTimeout(() => { S.startPick('world'); U.el('pick-banner').classList.remove('loading'); }, 30); };
+      U.el('pb-diff').onchange = () => { if (G) G.diff = U.el('pb-diff').value; };
+    }
+    U.el('pb-scen-wrap').classList.toggle('hidden', S.pickKind !== 'world');
+    const sc = LOL.SCENARIOS[scSel.value || '1936'];
+    U.el('pb-desc').textContent = S.pickKind === 'world' && sc ? sc.desc : 'Rastgele üretilen bir dünyada sekiz ulus.';
+    S.newMap((Math.random() * 1e9) >>> 0, S.pickKind, { scenario: scSel.value || '1936', diff: U.el('pb-diff').value });
     document.querySelectorAll('#pick-banner [data-kind]').forEach((b) => b.classList.toggle('on', b.dataset.kind === S.pickKind));
     U.el('btn-newmap').classList.toggle('hidden', S.pickKind === 'world');
     S.setPhase('pick');
@@ -1265,9 +1391,10 @@
     if (!G || G.playerId < 0) return;
     const data = {
       seed: G.seed, kind: G.kind, turn: G.turn, playerId: G.playerId,
-      nations: G.nations.map((n) => ({ advisor: n.advisor, gold: n.gold, alive: n.alive, capital: n.capital, manpower: n.manpower, stability: n.stability, techs: n.techs, research: n.research, gov: n.gov, leader: n.leader, flagSeed: n.flagSeed })),
+      nations: G.nations.map((n) => ({ mobilizeUntil: n.mobilizeUntil, great: n.great, advisor: n.advisor, gold: n.gold, alive: n.alive, capital: n.capital, manpower: n.manpower, stability: n.stability, techs: n.techs, research: n.research, gov: n.gov, leader: n.leader, flagSeed: n.flagSeed })),
       provinces: G.provinces.map((p) => ({ o: p.owner, u: p.units, r: p.ready, c: p.isCapital, b: p.buildings, q: p.queue })),
-      day: G.day, nextArmyId: G.nextArmyId, armies: G.armies.map((a) => ({ id: a.id, owner: a.owner, units: a.units, x: a.x, y: a.y, prov: a.prov, name: a.name, wp: a.wp, dest: a.dest })),
+      day: G.day, nextArmyId: G.nextArmyId, armies: G.armies.map((a) => ({ id: a.id, owner: a.owner, units: a.units, x: a.x, y: a.y, prov: a.prov, name: a.name, wp: a.wp, dest: a.dest, gen: a.gen, siege: a.siege })),
+      generals: G.generals, nextGenId: G.nextGenId, scenario: G.scenario, diff: G.diff,
       wars: [...G.wars], allies: [...G.allies], truce: G.truce, rel: G.rel, news: G.news.slice(0, 30),
     };
     try {
@@ -1280,11 +1407,13 @@
     let data;
     try { data = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { return false; }
     if (!data) return false;
-    S.newMap(data.seed, data.kind);
+    S.newMap(data.seed, data.kind, { scenario: data.scenario, diff: data.diff });
     G.turn = data.turn; G.playerId = data.playerId;
     data.nations.forEach((d, i) => Object.assign(G.nations[i], d));
     data.provinces.forEach((d, i) => { const p = G.provinces[i]; p.owner = d.o; p.units = d.u; p.ready = d.r; p.isCapital = d.c; p.buildings = d.b; p.queue = d.q; });
     G.day = data.day || 0; G.nextArmyId = data.nextArmyId || 1;
+    if (data.generals) { G.generals = data.generals; G.nextGenId = data.nextGenId || 1; }
+    G.diff = data.diff || 'normal';
     G.armies = (data.armies || []).map((a) => ({ chase: null, idle: 0, ...a, wp: a.wp || [] }));
     G.wars = new Set(data.wars); G.allies = new Set(data.allies || []); G.truce = data.truce || {}; G.rel = data.rel || {}; G.news = data.news || [];
     sel = -1; dirty = true;
@@ -1298,6 +1427,7 @@
     document.querySelectorAll('[data-ico]').forEach((e) => { e.outerHTML = UI.icon(e.dataset.ico, 18); });
     U.el('btn-diplo').onclick = () => { LOL.audio.play('click'); diplomacy(); };
     U.el('btn-tech').onclick = () => { LOL.audio.play('click'); techScreen(); };
+    U.el('btn-ency').onclick = () => { LOL.audio.play('click'); LOL.encyclopedia.open(); };
     U.el('tb-nation').onclick = () => { if (phase === 'play' || phase === 'busy') { LOL.audio.play('click'); nationScreen(); } };
     U.el('btn-save').onclick = () => { LOL.audio.play('click'); save(false); };
     U.el('btn-newmap').onclick = () => { LOL.audio.play('click'); S.startPick(); };
@@ -1405,7 +1535,8 @@
     G: () => G, map: () => map, cam: () => cam, phase: () => phase, P, nation, isPlayer, atWar, allied, truce, key, rel,
     provsOf, enemiesOf, powerOf, defBonus, fight, capture, news, nn, declareWar, checkGameOver, monthEnd,
     setDirty: () => { dirty = true; }, updatePanel: () => updatePanel(), updateTop: () => updateTop(), toScreen, toWorld,
-    nationPower, dateStr, MONTHS, focus: (x, y) => { cam.x = canvas.width / 2 - x * cam.s; cam.y = canvas.height / 2 - y * cam.s; },
+    nationPower, dateStr, MONTHS, economy, alliesOf, eff, TECHS, TECH, TRAITS, RANKS, GEN_XP, DIFF, makeGeneral, generalsOf, genById, genMult, genXp, absDay, neighborNations, major,
+    focus: (x, y) => { cam.x = canvas.width / 2 - x * cam.s; cam.y = canvas.height / 2 - y * cam.s; },
   };
   // ---------------------------------------------------------------- advisor commands
   // Each command validates against the game rules and returns { ok, msg }.

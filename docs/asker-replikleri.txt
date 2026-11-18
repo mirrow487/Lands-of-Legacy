@@ -1,0 +1,74 @@
+LANDS OF LEGACY — ASKER REPLİKLERİ
+
+Her repliği ayrı bir ses dosyası olarak kaydet ve dosyaya soldaki kodu ad olarak ver (ör. piyade_sec_1.mp3).
+Desteklenen biçimler: mp3, ogg, wav, m4a. Telsiz havası için kısa (1-2 sn) ve net kayıtlar en iyisidir.
+Dosyaları oyunda Ayarlar > Asker Sesleri > "Ses Dosyalarını Yükle" ile seç; ya da oyunun yanına "voices" klasörü açıp mp3 olarak koy.
+
+
+== PİYADE (piyade, makineli tüfek, tanksavar) ==
+  -- Seçilince --
+  piyade_sec_1              Komutanım?
+  piyade_sec_2              Emrinizdeyiz.
+  piyade_sec_3              Piyade hazır.
+  piyade_sec_4              Dinliyoruz, komutanım.
+  -- Hareket emri --
+  piyade_hareket_1          Emredersiniz!
+  piyade_hareket_2          İlerliyoruz!
+  piyade_hareket_3          Hemen, komutanım!
+  piyade_hareket_4          Anlaşıldı, yola çıkıyoruz!
+  -- Saldırı emri --
+  piyade_saldiri_1          Hücum!
+  piyade_saldiri_2          Ateş serbest!
+  piyade_saldiri_3          Süngü tak, saldırıya!
+  piyade_saldiri_4          Vatan için, ileri!
+
+== ZIRHLI BİRLİKLER (tank, ağır tank, keşif) ==
+  -- Seçilince --
+  zirhli_sec_1              Zırhlı birlik hazır.
+  zirhli_sec_2              Tank komutanı dinliyor.
+  zirhli_sec_3              Motorlar çalışıyor.
+  -- Hareket emri --
+  zirhli_hareket_1          Paletler dönüyor!
+  zirhli_hareket_2          Yoldayız!
+  zirhli_hareket_3          Tam gaz ileri!
+  -- Saldırı emri --
+  zirhli_saldiri_1          Hedef kilitlendi!
+  zirhli_saldiri_2          Ateş!
+  zirhli_saldiri_3          Ezin onları!
+
+== TOPÇU (topçu, roket topçusu) ==
+  -- Seçilince --
+  topcu_sec_1               Topçu mevzide.
+  topcu_sec_2               Koordinat bekliyoruz.
+  topcu_sec_3               Toplar hazır.
+  -- Hareket emri --
+  topcu_hareket_1           Mevzi değiştiriyoruz.
+  topcu_hareket_2           Anlaşıldı, hareket ediyoruz.
+  topcu_hareket_3           Topları çekin, gidiyoruz!
+  -- Saldırı emri --
+  topcu_saldiri_1           Hedef koordinatları alındı!
+  topcu_saldiri_2           Bombardıman başlıyor!
+  topcu_saldiri_3           Ateş!
+
+== OLAYLAR (savaş alanı ve harita) ==
+  olay_atesaltinda_1        Ateş altındayız!
+  olay_atesaltinda_2        Sipere girin!
+  olay_atesaltinda_3        Bizi vuruyorlar, takviye lazım!
+  olay_kayip_1              Bir birliğimizi kaybettik!
+  olay_kayip_2              Adam vuruldu!
+  olay_kayip_3              Kayıp verdik, komutanım!
+  olay_zafer_1              Zafer bizimdir!
+  olay_zafer_2              Düşman kaçıyor!
+  olay_zafer_3              Mevzi bizim, komutanım!
+  olay_yenilgi_1            Geri çekilin! Geri çekilin!
+  olay_yenilgi_2            Hattı tutamıyoruz!
+  olay_geri_1               Geri çekiliyoruz!
+  olay_geri_2               Emir alındı, çekiliyoruz.
+  olay_terfi_1              Terfi için teşekkürler, komutanım!
+  olay_terfi_2              Tecrübe kazandık!
+  olay_kusatma_1            Kuşatma başladı!
+  olay_kusatma_2            Surları dövüyoruz!
+  olay_savas_1              Savaş ilan edildi! Seferberlik başladı!
+  olay_savas_2              Düşman sınırı geçti!
+
+Toplam 49 replik. Hepsini kaydetmek zorunda değilsin: kaydettiklerin çalar, eksik olanlar için o an ses çıkmaz.

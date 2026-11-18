@@ -39,6 +39,7 @@
     <div class="tb-date"><div id="tb-date"></div><div id="tb-wars"></div></div>
     <div class="spacer"></div>
     <div class="tb-actions">
+      <button class="tbtn" id="btn-ency" title="Ansiklopedi (E)"><span data-ico="book"></span><em>Ansiklopedi</em></button>
       <button class="tbtn" id="btn-diplo" title="Diplomasi"><span data-ico="handshake"></span><em>Diplomasi</em></button>
       <button class="tbtn" id="btn-tech" title="Teknoloji"><span data-ico="sci"></span><em>Teknoloji</em></button>
       <button class="tbtn" id="btn-save" title="Kaydet"><span data-ico="save"></span><em>Kaydet</em></button>
@@ -51,10 +52,15 @@
     <div class="pb-title">Ulusunu Seç</div>
     <div class="pb-sub">Haritada bir ülkeye tıkla. Her ulusun konumu, gücü ve komşuları farklıdır.</div>
     <div class="pb-row">
-      <button data-kind="world">🌍 Gerçek Dünya (1936)</button>
+      <button data-kind="world">🌍 Gerçek Dünya</button>
       <button data-kind="fantasy">🗺 Hayali Dünya</button>
       <button id="btn-newmap">Yeni Hayali Dünya</button>
     </div>
+    <div class="pb-row pb-opts">
+      <label id="pb-scen-wrap">Senaryo <select id="pb-scen"></select></label>
+      <label>Zorluk <select id="pb-diff"><option value="kolay">Kolay</option><option value="normal" selected>Normal</option><option value="zor">Zor</option></select></label>
+    </div>
+    <div id="pb-desc" class="pb-sub"></div>
   </div>
 
   <div id="prov-panel" class="panel hidden"></div>
@@ -130,12 +136,14 @@
 <script src="js/ui.js"></script>
 <script src="js/worlddata.js"></script>
 <script src="js/worldinfo.js"></script>
+<script src="js/scenarios.js"></script>
 <script src="js/mapgen.js"></script>
 <script src="js/battle.js"></script>
 <script src="js/strategy.js"></script>
 <script src="js/campaign.js"></script>
 <script src="js/vendor-anthropic.js"></script>
 <script src="js/advisor.js"></script>
+<script src="js/encyclopedia.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

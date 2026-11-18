@@ -1,0 +1,2 @@
+Kendi kaydettiğin asker seslerini bu klasöre koyabilirsin.
+Dosya adları docs/asker-replikleri.txt içindeki kodlarla aynı olmalı (ör. piyade_sec_1.mp3).
