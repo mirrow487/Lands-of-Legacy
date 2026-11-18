@@ -248,7 +248,25 @@
     labels = [];
     for (const n of G.nations) {
       if (!n.alive) continue;
-      const ps = provsOf(n.id);
+      // use the largest contiguous land block (ignores Alaska, Chukotka, overseas islands...)
+      const all = provsOf(n.id);
+      if (!all.length) continue;
+      const seen = new Set();
+      let ps = [], best = -1;
+      for (const start of all) {
+        if (seen.has(start.id)) continue;
+        const comp = [], q = [start]; seen.add(start.id);
+        while (q.length) {
+          const p = q.pop(); comp.push(p);
+          for (const k of p.neighbors) {
+            const o = P(k);
+            if (o.owner !== n.id || seen.has(k) || p.naval.includes(k)) continue;
+            seen.add(k); q.push(o);
+          }
+        }
+        const area = comp.reduce((t, p) => t + p.size, 0);
+        if (area > best) { best = area; ps = comp; }
+      }
       let sw = 0, mx = 0, my = 0;
       ps.forEach((p) => { sw += p.size; mx += p.cx * p.size; my += p.cy * p.size; });
       mx /= sw; my /= sw;
@@ -256,7 +274,8 @@
       ps.forEach((p) => { const dx = p.cx - mx, dy = p.cy - my; cxx += dx * dx * p.size; cyy += dy * dy * p.size; cxy += dx * dy * p.size; });
       cxx /= sw; cyy /= sw; cxy /= sw;
       let ang = 0.5 * Math.atan2(2 * cxy, cxx - cyy);
-      ang = U.clamp(ang, -0.6, 0.6);
+      const elong = Math.max(cxx, cyy) / Math.max(1, Math.min(cxx, cyy));
+      ang = elong > 3 ? U.clamp(ang, -1.35, 1.35) : U.clamp(ang, -0.6, 0.6);
       const ax = Math.cos(ang), ay = Math.sin(ang);
       let lo = 1e9, hi = -1e9, perp = 0;
       ps.forEach((p) => {
@@ -1359,6 +1378,13 @@
         muttefikler: alliesOf(me).map((x) => x.name),
         komsular: neighborNations(me).slice(0, 14).map((o) => ({ ulus: nation(o).name, guc: Math.round(nationPower(o)), iliski: Math.round(rel(me, o)), durum: atWar(me, o) ? 'savaş' : allied(me, o) ? 'müttefik' : truce(me, o) ? 'ateşkes' : 'barış' })),
         bolgelerim: mine.slice(0, 30).map((p) => ({ ad: p.name, arazi: p.terrain, birlikler: unitList(p.units), binalar: p.buildings, baskent: p.isCapital || undefined })),
+        bolgeAdlari: mine.map((p) => p.name),
+        ordularim: LOL.campaign.armyList().filter((a) => a.sahibi === n.name),
+        dusmanOrdulari: LOL.campaign.armyList().filter((a) => enemiesOf(me).some((x) => x.name === a.sahibi)).slice(0, 12),
+        birlikMaliyetleri: Object.fromEntries(U.TYPES.map((t) => [t, { ad: C.unitName[t], altin: unitCost(me, t), insanGucu: C.mp[t], kilitli: !!(C.req[t] && !n.techs.includes(C.req[t])) }])),
+        binaMaliyetleri: { fac: 'Fabrika ' + BUILD.fac.cost(0) + '+ altın', fort: 'Tahkimat ' + BUILD.fort.cost(0) + '+ altın', bar: 'Kışla ' + BUILD.bar.cost(0) + '+ altın' },
+        teknolojiListesi: S.cmd.techList(),
+        savastakiUlkeBolgeleri: enemiesOf(me).slice(0, 4).map((x) => ({ ulus: x.name, bolgeler: provsOf(x.id).slice(0, 12).map((p) => ({ ad: p.name, garnizonGucu: Math.round(powerOf(p.units, x.id) * defBonus(p)) })) })),
         tehditler: threats.slice(0, 5).map((t) => `${t.name}: düşman ${t.enemyPower} / biz ${t.myPower}`),
         firsatlar: opps.slice(0, 5).map((o) => `${o.fromName} -> ${o.toName} (${o.att} vs ${o.def})`),
       },
@@ -1381,6 +1407,92 @@
     setDirty: () => { dirty = true; }, updatePanel: () => updatePanel(), updateTop: () => updateTop(), toScreen, toWorld,
     nationPower, dateStr, MONTHS, focus: (x, y) => { cam.x = canvas.width / 2 - x * cam.s; cam.y = canvas.height / 2 - y * cam.s; },
   };
+  // ---------------------------------------------------------------- advisor commands
+  // Each command validates against the game rules and returns { ok, msg }.
+  const norm = (t) => String(t || '').toLocaleLowerCase('tr').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/ı/g, 'i').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  function findBy(list, name, getName) {
+    const q = norm(name);
+    if (!q) return null;
+    return list.find((x) => norm(getName(x)) === q) || list.find((x) => norm(getName(x)).startsWith(q)) || list.find((x) => norm(getName(x)).includes(q)) || list.find((x) => q.includes(norm(getName(x))) && norm(getName(x)).length > 3) || null;
+  }
+  const findNation = (name) => findBy(G.nations.filter((n) => n.alive && n.id !== G.playerId), name, (n) => n.name) || findBy(G.nations.filter((n) => n.alive && n.id !== G.playerId && n.en), name, (n) => n.en);
+  const findProv = (name, ownOnly) => findBy(G.provinces.filter((p) => !ownOnly || p.owner === G.playerId), name, (p) => p.name);
+  const findUnit = (name) => U.TYPES.find((t) => t === name) || U.TYPES.find((t) => norm(C.unitName[t]) === norm(name) || norm(C.unitShort[t]) === norm(name)) || null;
+  const BUILD_ALIAS = { fabrika: 'fac', fac: 'fac', factory: 'fac', tahkimat: 'fort', kale: 'fort', fort: 'fort', kisla: 'bar', bar: 'bar', barracks: 'bar' };
+  S.cmd = {
+    nationNames: () => G.nations.filter((n) => n.alive && n.id !== G.playerId).map((n) => n.name),
+    techList: () => TECHS.map((t) => ({ id: t.id, ad: t.name, dal: t.br, durum: nation(G.playerId).techs.includes(t.id) ? 'tamam' : t.req && !nation(G.playerId).techs.includes(t.req) ? 'kilitli' : 'açık' })),
+    run(a) {
+      const me = G.playerId, mine = nation(me);
+      const t = a.type;
+      if (t === 'declare_war') {
+        const o = findNation(a.nation); if (!o) return { ok: false, msg: `Ülke bulunamadı: ${a.nation}` };
+        if (atWar(me, o.id)) return { ok: false, msg: `${o.name} ile zaten savaştayız.` };
+        if (allied(me, o.id)) return { ok: false, msg: `${o.name} müttefikimiz.` };
+        if (truce(me, o.id)) return { ok: false, msg: `${o.name} ile ateşkes var.` };
+        declareWar(me, o.id); mine.stability = Math.max(0, mine.stability - 5);
+        return { ok: true, msg: `${o.name} ulusuna savaş ilan edildi.` };
+      }
+      if (t === 'propose_peace') {
+        const o = findNation(a.nation); if (!o) return { ok: false, msg: `Ülke bulunamadı: ${a.nation}` };
+        if (!atWar(me, o.id)) return { ok: false, msg: `${o.name} ile savaşta değiliz.` };
+        if (nationPower(o.id) < nationPower(me) * 0.8 || Math.random() < 0.2 + rel(me, o.id) / 200) { makePeace(me, o.id); return { ok: true, msg: `${o.name} barışı kabul etti.` }; }
+        return { ok: false, msg: `${o.name} barış teklifini reddetti.` };
+      }
+      if (t === 'send_gift') {
+        const o = findNation(a.nation); if (!o) return { ok: false, msg: `Ülke bulunamadı: ${a.nation}` };
+        if (mine.gold < 25) return { ok: false, msg: 'Hediye için 25 altın yok.' };
+        mine.gold -= 25; addRel(me, o.id, 15); LOL.audio.play('coin');
+        return { ok: true, msg: `${o.name} ulusuna hediye gönderildi (ilişki +15).` };
+      }
+      if (t === 'propose_alliance') {
+        const o = findNation(a.nation); if (!o) return { ok: false, msg: `Ülke bulunamadı: ${a.nation}` };
+        if (atWar(me, o.id) || allied(me, o.id)) return { ok: false, msg: `${o.name} ile ittifak mümkün değil.` };
+        if (rel(me, o.id) > 40 && Math.random() < 0.4 + rel(me, o.id) / 150) { makeAlliance(me, o.id); return { ok: true, msg: `${o.name} ile ittifak kuruldu.` }; }
+        addRel(me, o.id, -5); return { ok: false, msg: `${o.name} ittifakı reddetti (ilişki ${Math.round(rel(me, o.id))}, en az 40 olmalı).` };
+      }
+      if (t === 'recruit') {
+        const p = findProv(a.province, true); if (!p) return { ok: false, msg: `Bölgemiz bulunamadı: ${a.province}` };
+        const u = findUnit(a.unit); if (!u) return { ok: false, msg: `Birlik türü bilinmiyor: ${a.unit}` };
+        if (C.req[u] && !mine.techs.includes(C.req[u])) return { ok: false, msg: `${C.unitName[u]} için ${TECH[C.req[u]].name} gerekli.` };
+        const want = U.clamp(Math.round(+a.count || 1), 1, 50);
+        const n = recruit(p, u, want);
+        if (!n) return { ok: false, msg: `${p.name}: ${C.unitName[u]} için altın ya da insan gücü yetmiyor.` };
+        return { ok: true, msg: `${p.name}: ${n} ${C.unitName[u]} toplandı${n < want ? ` (${want} istenmişti, kaynak yetti bu kadar)` : ''}.` };
+      }
+      if (t === 'build') {
+        const p = findProv(a.province, true); if (!p) return { ok: false, msg: `Bölgemiz bulunamadı: ${a.province}` };
+        const b = BUILD_ALIAS[norm(a.building)]; if (!b) return { ok: false, msg: `Bina türü bilinmiyor: ${a.building}` };
+        if (p.queue) return { ok: false, msg: `${p.name}: zaten bir inşaat sürüyor.` };
+        if (p.buildings[b] >= BUILD[b].max) return { ok: false, msg: `${p.name}: ${BUILD[b].name} en üst seviyede.` };
+        if (!build(p, b)) return { ok: false, msg: `${p.name}: ${BUILD[b].name} için ${BUILD[b].cost(p.buildings[b])} altın gerekli.` };
+        return { ok: true, msg: `${p.name}: ${BUILD[b].name} inşaatı başladı.` };
+      }
+      if (t === 'research') {
+        const tech = TECHS.find((x) => x.id === a.tech) || findBy(TECHS, a.tech, (x) => x.name);
+        if (!tech) return { ok: false, msg: `Teknoloji bulunamadı: ${a.tech}` };
+        if (mine.techs.includes(tech.id)) return { ok: false, msg: `${tech.name} zaten araştırıldı.` };
+        if (tech.req && !mine.techs.includes(tech.req)) return { ok: false, msg: `${tech.name} için önce ${TECH[tech.req].name} gerekli.` };
+        if (mine.research.cur && mine.research.cur !== tech.id) mine.research.prog = Math.floor(mine.research.prog * 0.5);
+        mine.research.cur = tech.id;
+        return { ok: true, msg: `Araştırma: ${tech.name}.` };
+      }
+      if (t === 'form_army') {
+        const p = findProv(a.province, true); if (!p) return { ok: false, msg: `Bölgemiz bulunamadı: ${a.province}` };
+        const take = U.zeroUnits();
+        if (!a.units || a.units === 'all') U.TYPES.forEach((k) => { take[k] = p.units[k]; });
+        else for (const k in a.units) { const u = findUnit(k); if (u) take[u] = U.clamp(Math.round(+a.units[k] || 0), 0, p.units[u]); }
+        if (!U.sumUnits(take)) return { ok: false, msg: `${p.name}: orduya katılacak birlik yok.` };
+        U.TYPES.forEach((k) => { p.units[k] -= take[k]; });
+        const army = LOL.campaign.formArmy(me, take, p);
+        return { ok: true, msg: `${p.name}: ${army.name} kuruldu (${U.unitsText(take)}).`, army };
+      }
+      if (t === 'move_army' || t === 'attack_army' || t === 'merge_army') return LOL.campaign.cmd(a, { findProv, findBy, findNation });
+      return { ok: false, msg: `Bilinmeyen eylem: ${t}` };
+    },
+    after() { dirty = true; updatePanel(); updateTop(); },
+  };
+
   S.refresh = function () { dirty = true; updatePanel(); updateTop(); renderNews(); };
   S.debug = () => ({ G, map, cam, sel, phase });
 })();

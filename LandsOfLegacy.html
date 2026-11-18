@@ -391,6 +391,17 @@ input[type=range] { width: 100%; accent-color: var(--gold); }
 .ai-row select { flex: 1; }
 #tb-date { white-space: nowrap; }
 #tb-name, #tb-gov { white-space: nowrap; max-width: 230px; overflow: hidden; text-overflow: ellipsis; }
+.adv-acts { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.adv-act { font-size: 11.5px; padding: 5px 8px; border-radius: 6px; background: rgba(0,0,0,.25); border: 1px solid var(--line2); font-style: normal; }
+.adv-act small { display: block; color: var(--muted); margin-top: 2px; }
+.adv-act.ok { border-color: rgba(99,196,106,.5); }
+.adv-act.ok small { color: #9fe0a5; }
+.adv-act.bad { border-color: rgba(226,83,63,.5); }
+.adv-act.bad small { color: #ffb4a6; }
+.adv-act-btns { display: flex; gap: 6px; margin-top: 4px; }
+.adv-act-btns button { flex: 1; padding: 6px; font-size: 12px; }
+.advisor { width: 400px; }
+.adv-chat { max-height: 300px; }
 
 </style>
 </head>
@@ -2190,6 +2201,7 @@ LOL.WORLD=[{"n":"Zimbabwe","p":[[[31.3,-22.4,31.2,-22.3,31.1,-22.3,30.9,-22.3,30
     const pixByC = countries.map(() => []);
     for (let i = 0; i < N; i++) if (cid[i] >= 0) pixByC[cid[i]].push(i);
     let seeds = []; // {x,y,c}
+    const mainCompOf = new Int32Array(countries.length).fill(-1);
     countries.forEach((c, ci) => {
       if (!keep[ci]) return;
       const pix = pixByC[ci];
@@ -2209,6 +2221,17 @@ LOL.WORLD=[{"n":"Zimbabwe","p":[[[31.3,-22.4,31.2,-22.3,31.1,-22.3,30.9,-22.3,30
         if (local.every((s) => (s.x - x) ** 2 + (s.y - y) ** 2 >= minD * minD)) local.push({ x, y, c: ci });
       }
       if (!local.length) { const i = pix[area >> 1]; local.push({ x: i % W, y: (i / W) | 0, c: ci }); }
+      // every separate landmass of the country (overseas territory, big island) gets its own province
+      const byComp = new Map();
+      mainCompOf[ci] = -1;
+      for (const i of pix) { const cc = comp[i]; let e = byComp.get(cc); if (!e) { e = { n: 0, i }; byComp.set(cc, e); } e.n++; if (e.n === Math.ceil(e.n / 2) * 2 && (e.n & 63) === 0) e.i = i; }
+      local.forEach((s2) => { s2.comp = comp[s2.y * W + s2.x]; });
+      let bigN = 0;
+      for (const [cc, e] of byComp) if (e.n > bigN) { bigN = e.n; mainCompOf[ci] = cc; }
+      for (const [cc, e] of byComp) {
+        if (e.n < 25 || local.some((s2) => s2.comp === cc)) continue;
+        local.push({ x: e.i % W, y: (e.i / W) | 0, c: ci, comp: cc });
+      }
       local.forEach((s) => seeds.push(s));
     });
     let seedsByC = countries.map(() => []);
@@ -2217,7 +2240,8 @@ LOL.WORLD=[{"n":"Zimbabwe","p":[[[31.3,-22.4,31.2,-22.3,31.1,-22.3,30.9,-22.3,30
     for (let i = 0; i < N; i++) {
       const ci = cid[i];
       if (ci < 0) continue;
-      const list = seedsByC[ci];
+      let list = seedsByC[ci];
+      if (list.length > 1) { const same = list.filter((k) => seeds[k].comp === comp[i]); if (same.length) list = same; }
       if (list.length === 1) { pid[i] = list[0]; continue; }
       const x = i % W, y = (i / W) | 0;
       const jx = x + (nzA.fbm(x / 25, y / 25, 3) - 0.5) * 40, jy = y + (nzB.fbm(x / 25, y / 25, 3) - 0.5) * 40;
@@ -2239,7 +2263,16 @@ LOL.WORLD=[{"n":"Zimbabwe","p":[[[31.3,-22.4,31.2,-22.3,31.1,-22.3,30.9,-22.3,30
     // province names: country + direction
     const names = seeds.map((s) => {
       const nat = nations[natOf[s.c]];
-      const list = seedsByC[s.c];
+      let list = seedsByC[s.c];
+      if (list.length === 1) return nat.name;
+      if (s.comp !== mainCompOf[s.c]) {
+        // overseas territory / island: name it relative to the homeland
+        const home = list.map((k) => seeds[k]).filter((q) => q.comp === mainCompOf[s.c]);
+        const hx = home.length ? home.reduce((t, q) => t + q.x, 0) / home.length : s.x;
+        const hy = home.length ? home.reduce((t, q) => t + q.y, 0) / home.length : s.y;
+        return Math.hypot(s.x - hx, s.y - hy) > 160 ? 'Denizaşırı ' + nat.name : nat.name + ' Adası';
+      }
+      list = list.filter((k) => seeds[k].comp === mainCompOf[s.c]);
       if (list.length === 1) return nat.name;
       let cx = 0, cy = 0;
       list.forEach((k) => { cx += seeds[k].x; cy += seeds[k].y; });
@@ -4660,7 +4693,25 @@ LOL.WORLD=[{"n":"Zimbabwe","p":[[[31.3,-22.4,31.2,-22.3,31.1,-22.3,30.9,-22.3,30
     labels = [];
     for (const n of G.nations) {
       if (!n.alive) continue;
-      const ps = provsOf(n.id);
+      // use the largest contiguous land block (ignores Alaska, Chukotka, overseas islands...)
+      const all = provsOf(n.id);
+      if (!all.length) continue;
+      const seen = new Set();
+      let ps = [], best = -1;
+      for (const start of all) {
+        if (seen.has(start.id)) continue;
+        const comp = [], q = [start]; seen.add(start.id);
+        while (q.length) {
+          const p = q.pop(); comp.push(p);
+          for (const k of p.neighbors) {
+            const o = P(k);
+            if (o.owner !== n.id || seen.has(k) || p.naval.includes(k)) continue;
+            seen.add(k); q.push(o);
+          }
+        }
+        const area = comp.reduce((t, p) => t + p.size, 0);
+        if (area > best) { best = area; ps = comp; }
+      }
       let sw = 0, mx = 0, my = 0;
       ps.forEach((p) => { sw += p.size; mx += p.cx * p.size; my += p.cy * p.size; });
       mx /= sw; my /= sw;
@@ -4668,7 +4719,8 @@ LOL.WORLD=[{"n":"Zimbabwe","p":[[[31.3,-22.4,31.2,-22.3,31.1,-22.3,30.9,-22.3,30
       ps.forEach((p) => { const dx = p.cx - mx, dy = p.cy - my; cxx += dx * dx * p.size; cyy += dy * dy * p.size; cxy += dx * dy * p.size; });
       cxx /= sw; cyy /= sw; cxy /= sw;
       let ang = 0.5 * Math.atan2(2 * cxy, cxx - cyy);
-      ang = U.clamp(ang, -0.6, 0.6);
+      const elong = Math.max(cxx, cyy) / Math.max(1, Math.min(cxx, cyy));
+      ang = elong > 3 ? U.clamp(ang, -1.35, 1.35) : U.clamp(ang, -0.6, 0.6);
       const ax = Math.cos(ang), ay = Math.sin(ang);
       let lo = 1e9, hi = -1e9, perp = 0;
       ps.forEach((p) => {
@@ -5771,6 +5823,13 @@ LOL.WORLD=[{"n":"Zimbabwe","p":[[[31.3,-22.4,31.2,-22.3,31.1,-22.3,30.9,-22.3,30
         muttefikler: alliesOf(me).map((x) => x.name),
         komsular: neighborNations(me).slice(0, 14).map((o) => ({ ulus: nation(o).name, guc: Math.round(nationPower(o)), iliski: Math.round(rel(me, o)), durum: atWar(me, o) ? 'savaş' : allied(me, o) ? 'müttefik' : truce(me, o) ? 'ateşkes' : 'barış' })),
         bolgelerim: mine.slice(0, 30).map((p) => ({ ad: p.name, arazi: p.terrain, birlikler: unitList(p.units), binalar: p.buildings, baskent: p.isCapital || undefined })),
+        bolgeAdlari: mine.map((p) => p.name),
+        ordularim: LOL.campaign.armyList().filter((a) => a.sahibi === n.name),
+        dusmanOrdulari: LOL.campaign.armyList().filter((a) => enemiesOf(me).some((x) => x.name === a.sahibi)).slice(0, 12),
+        birlikMaliyetleri: Object.fromEntries(U.TYPES.map((t) => [t, { ad: C.unitName[t], altin: unitCost(me, t), insanGucu: C.mp[t], kilitli: !!(C.req[t] && !n.techs.includes(C.req[t])) }])),
+        binaMaliyetleri: { fac: 'Fabrika ' + BUILD.fac.cost(0) + '+ altın', fort: 'Tahkimat ' + BUILD.fort.cost(0) + '+ altın', bar: 'Kışla ' + BUILD.bar.cost(0) + '+ altın' },
+        teknolojiListesi: S.cmd.techList(),
+        savastakiUlkeBolgeleri: enemiesOf(me).slice(0, 4).map((x) => ({ ulus: x.name, bolgeler: provsOf(x.id).slice(0, 12).map((p) => ({ ad: p.name, garnizonGucu: Math.round(powerOf(p.units, x.id) * defBonus(p)) })) })),
         tehditler: threats.slice(0, 5).map((t) => `${t.name}: düşman ${t.enemyPower} / biz ${t.myPower}`),
         firsatlar: opps.slice(0, 5).map((o) => `${o.fromName} -> ${o.toName} (${o.att} vs ${o.def})`),
       },
@@ -5793,6 +5852,92 @@ LOL.WORLD=[{"n":"Zimbabwe","p":[[[31.3,-22.4,31.2,-22.3,31.1,-22.3,30.9,-22.3,30
     setDirty: () => { dirty = true; }, updatePanel: () => updatePanel(), updateTop: () => updateTop(), toScreen, toWorld,
     nationPower, dateStr, MONTHS, focus: (x, y) => { cam.x = canvas.width / 2 - x * cam.s; cam.y = canvas.height / 2 - y * cam.s; },
   };
+  // ---------------------------------------------------------------- advisor commands
+  // Each command validates against the game rules and returns { ok, msg }.
+  const norm = (t) => String(t || '').toLocaleLowerCase('tr').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/ı/g, 'i').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  function findBy(list, name, getName) {
+    const q = norm(name);
+    if (!q) return null;
+    return list.find((x) => norm(getName(x)) === q) || list.find((x) => norm(getName(x)).startsWith(q)) || list.find((x) => norm(getName(x)).includes(q)) || list.find((x) => q.includes(norm(getName(x))) && norm(getName(x)).length > 3) || null;
+  }
+  const findNation = (name) => findBy(G.nations.filter((n) => n.alive && n.id !== G.playerId), name, (n) => n.name) || findBy(G.nations.filter((n) => n.alive && n.id !== G.playerId && n.en), name, (n) => n.en);
+  const findProv = (name, ownOnly) => findBy(G.provinces.filter((p) => !ownOnly || p.owner === G.playerId), name, (p) => p.name);
+  const findUnit = (name) => U.TYPES.find((t) => t === name) || U.TYPES.find((t) => norm(C.unitName[t]) === norm(name) || norm(C.unitShort[t]) === norm(name)) || null;
+  const BUILD_ALIAS = { fabrika: 'fac', fac: 'fac', factory: 'fac', tahkimat: 'fort', kale: 'fort', fort: 'fort', kisla: 'bar', bar: 'bar', barracks: 'bar' };
+  S.cmd = {
+    nationNames: () => G.nations.filter((n) => n.alive && n.id !== G.playerId).map((n) => n.name),
+    techList: () => TECHS.map((t) => ({ id: t.id, ad: t.name, dal: t.br, durum: nation(G.playerId).techs.includes(t.id) ? 'tamam' : t.req && !nation(G.playerId).techs.includes(t.req) ? 'kilitli' : 'açık' })),
+    run(a) {
+      const me = G.playerId, mine = nation(me);
+      const t = a.type;
+      if (t === 'declare_war') {
+        const o = findNation(a.nation); if (!o) return { ok: false, msg: `Ülke bulunamadı: ${a.nation}` };
+        if (atWar(me, o.id)) return { ok: false, msg: `${o.name} ile zaten savaştayız.` };
+        if (allied(me, o.id)) return { ok: false, msg: `${o.name} müttefikimiz.` };
+        if (truce(me, o.id)) return { ok: false, msg: `${o.name} ile ateşkes var.` };
+        declareWar(me, o.id); mine.stability = Math.max(0, mine.stability - 5);
+        return { ok: true, msg: `${o.name} ulusuna savaş ilan edildi.` };
+      }
+      if (t === 'propose_peace') {
+        const o = findNation(a.nation); if (!o) return { ok: false, msg: `Ülke bulunamadı: ${a.nation}` };
+        if (!atWar(me, o.id)) return { ok: false, msg: `${o.name} ile savaşta değiliz.` };
+        if (nationPower(o.id) < nationPower(me) * 0.8 || Math.random() < 0.2 + rel(me, o.id) / 200) { makePeace(me, o.id); return { ok: true, msg: `${o.name} barışı kabul etti.` }; }
+        return { ok: false, msg: `${o.name} barış teklifini reddetti.` };
+      }
+      if (t === 'send_gift') {
+        const o = findNation(a.nation); if (!o) return { ok: false, msg: `Ülke bulunamadı: ${a.nation}` };
+        if (mine.gold < 25) return { ok: false, msg: 'Hediye için 25 altın yok.' };
+        mine.gold -= 25; addRel(me, o.id, 15); LOL.audio.play('coin');
+        return { ok: true, msg: `${o.name} ulusuna hediye gönderildi (ilişki +15).` };
+      }
+      if (t === 'propose_alliance') {
+        const o = findNation(a.nation); if (!o) return { ok: false, msg: `Ülke bulunamadı: ${a.nation}` };
+        if (atWar(me, o.id) || allied(me, o.id)) return { ok: false, msg: `${o.name} ile ittifak mümkün değil.` };
+        if (rel(me, o.id) > 40 && Math.random() < 0.4 + rel(me, o.id) / 150) { makeAlliance(me, o.id); return { ok: true, msg: `${o.name} ile ittifak kuruldu.` }; }
+        addRel(me, o.id, -5); return { ok: false, msg: `${o.name} ittifakı reddetti (ilişki ${Math.round(rel(me, o.id))}, en az 40 olmalı).` };
+      }
+      if (t === 'recruit') {
+        const p = findProv(a.province, true); if (!p) return { ok: false, msg: `Bölgemiz bulunamadı: ${a.province}` };
+        const u = findUnit(a.unit); if (!u) return { ok: false, msg: `Birlik türü bilinmiyor: ${a.unit}` };
+        if (C.req[u] && !mine.techs.includes(C.req[u])) return { ok: false, msg: `${C.unitName[u]} için ${TECH[C.req[u]].name} gerekli.` };
+        const want = U.clamp(Math.round(+a.count || 1), 1, 50);
+        const n = recruit(p, u, want);
+        if (!n) return { ok: false, msg: `${p.name}: ${C.unitName[u]} için altın ya da insan gücü yetmiyor.` };
+        return { ok: true, msg: `${p.name}: ${n} ${C.unitName[u]} toplandı${n < want ? ` (${want} istenmişti, kaynak yetti bu kadar)` : ''}.` };
+      }
+      if (t === 'build') {
+        const p = findProv(a.province, true); if (!p) return { ok: false, msg: `Bölgemiz bulunamadı: ${a.province}` };
+        const b = BUILD_ALIAS[norm(a.building)]; if (!b) return { ok: false, msg: `Bina türü bilinmiyor: ${a.building}` };
+        if (p.queue) return { ok: false, msg: `${p.name}: zaten bir inşaat sürüyor.` };
+        if (p.buildings[b] >= BUILD[b].max) return { ok: false, msg: `${p.name}: ${BUILD[b].name} en üst seviyede.` };
+        if (!build(p, b)) return { ok: false, msg: `${p.name}: ${BUILD[b].name} için ${BUILD[b].cost(p.buildings[b])} altın gerekli.` };
+        return { ok: true, msg: `${p.name}: ${BUILD[b].name} inşaatı başladı.` };
+      }
+      if (t === 'research') {
+        const tech = TECHS.find((x) => x.id === a.tech) || findBy(TECHS, a.tech, (x) => x.name);
+        if (!tech) return { ok: false, msg: `Teknoloji bulunamadı: ${a.tech}` };
+        if (mine.techs.includes(tech.id)) return { ok: false, msg: `${tech.name} zaten araştırıldı.` };
+        if (tech.req && !mine.techs.includes(tech.req)) return { ok: false, msg: `${tech.name} için önce ${TECH[tech.req].name} gerekli.` };
+        if (mine.research.cur && mine.research.cur !== tech.id) mine.research.prog = Math.floor(mine.research.prog * 0.5);
+        mine.research.cur = tech.id;
+        return { ok: true, msg: `Araştırma: ${tech.name}.` };
+      }
+      if (t === 'form_army') {
+        const p = findProv(a.province, true); if (!p) return { ok: false, msg: `Bölgemiz bulunamadı: ${a.province}` };
+        const take = U.zeroUnits();
+        if (!a.units || a.units === 'all') U.TYPES.forEach((k) => { take[k] = p.units[k]; });
+        else for (const k in a.units) { const u = findUnit(k); if (u) take[u] = U.clamp(Math.round(+a.units[k] || 0), 0, p.units[u]); }
+        if (!U.sumUnits(take)) return { ok: false, msg: `${p.name}: orduya katılacak birlik yok.` };
+        U.TYPES.forEach((k) => { p.units[k] -= take[k]; });
+        const army = LOL.campaign.formArmy(me, take, p);
+        return { ok: true, msg: `${p.name}: ${army.name} kuruldu (${U.unitsText(take)}).`, army };
+      }
+      if (t === 'move_army' || t === 'attack_army' || t === 'merge_army') return LOL.campaign.cmd(a, { findProv, findBy, findNation });
+      return { ok: false, msg: `Bilinmeyen eylem: ${t}` };
+    },
+    after() { dirty = true; updatePanel(); updateTop(); },
+  };
+
   S.refresh = function () { dirty = true; updatePanel(); updateTop(); renderNews(); };
   S.debug = () => ({ G, map, cam, sel, phase });
 })();
@@ -5938,6 +6083,7 @@ LOL.WORLD=[{"n":"Zimbabwe","p":[[[31.3,-22.4,31.2,-22.3,31.1,-22.3,30.9,-22.3,30
     };
     g.armies.push(a);
     if (I().isPlayer(owner)) {
+      K.lastFormed = a.id;
       selId = a.id;
       UI.toast(`<b>${a.name}</b> kuruldu. Haritada gitmesini istediğin yere sağ tıkla.`, 'good');
       LOL.audio.say('select', domClass(a.units));
@@ -6350,6 +6496,43 @@ LOL.WORLD=[{"n":"Zimbabwe","p":[[[31.3,-22.4,31.2,-22.3,31.1,-22.3,30.9,-22.3,30
     list.sort((u, v) => u.p[1] - v.p[1]);
     for (const o of list) token(ctx, o.a, o.p[0], o.p[1], s, o.a.id === selId);
   };
+  // advisor commands on armies
+  K.cmd = function (c, h) {
+    const i = I(), me = i.G().playerId;
+    const mineA = armies().filter((a) => a.owner === me);
+    const wantNew = !c.army || /^(yeni|new|son|last|\$last)$/i.test(String(c.army).trim());
+    const a = (wantNew && byId(K.lastFormed)) || h.findBy(mineA, c.army, (x) => x.name) || (mineA.length === 1 ? mineA[0] : null);
+    if (!a) return { ok: false, msg: `Ordu bulunamadı: ${c.army || '(belirtilmedi)'}` };
+    if (a.busy) return { ok: false, msg: `${a.name} şu an çarpışıyor.` };
+    if (c.type === 'merge_army') {
+      const p = P(a.prov);
+      if (!p || p.owner !== me) return { ok: false, msg: `${a.name} kendi bölgemizde değil.` };
+      mergeInto(a, p);
+      return { ok: true, msg: `${a.name}, ${p.name} garnizonuna katıldı.` };
+    }
+    if (c.type === 'attack_army') {
+      const foes = armies().filter((b) => b.owner !== me && hostile(me, b.owner));
+      let t = h.findBy(foes, c.target, (x) => x.name);
+      if (!t) {
+        const n = h.findNation(c.target);
+        if (n) t = foes.filter((b) => b.owner === n.id).sort((x, y) => Math.hypot(x.x - a.x, x.y - a.y) - Math.hypot(y.x - a.x, y.y - a.y))[0];
+      }
+      if (!t) return { ok: false, msg: `Savaşta olduğumuz düşman ordusu bulunamadı: ${c.target}` };
+      a.chase = t.id; a.mergeHome = false; chaseUpdate(a);
+      if (!a.wp.length) return { ok: false, msg: `${a.name} ${t.name} ordusuna ulaşamıyor.` };
+      if (!speed) K.setSpeed(1);
+      return { ok: true, msg: `${a.name}, ${t.name} ordusunun peşine düştü.` };
+    }
+    const p = h.findProv(c.province, false);
+    if (!p) return { ok: false, msg: `Bölge bulunamadı: ${c.province}` };
+    if (!friendly(me, p.owner) && !hostile(me, p.owner)) return { ok: false, msg: `${p.name} (${i.nation(p.owner).name}) ile savaşta değiliz — önce savaş ilan edilmeli.` };
+    a.chase = null;
+    if (!orderTo(a, p.id)) return { ok: false, msg: `${a.name} için ${p.name} bölgesine yol yok.` };
+    const days = Math.ceil(a.wp.reduce((s2, w, k) => s2 + Math.hypot(w.x - (k ? a.wp[k - 1].x : a.x), w.y - (k ? a.wp[k - 1].y : a.y)), 0) / speedPx(a));
+    if (!speed) K.setSpeed(1);
+    return { ok: true, msg: `${a.name} → ${p.name} (${hostile(me, p.owner) ? 'kuşatma, ' : ''}~${days} gün).` };
+  };
+  K.armyList = () => armies().map((a) => ({ ad: a.name, sahibi: I().nation(a.owner).name, konum: P(a.prov) ? P(a.prov).name : 'deniz', birlikler: Object.fromEntries(U.TYPES.filter((t) => a.units[t]).map((t) => [C.unitName[t], a.units[t]])), guc: Math.round(I().powerOf(a.units, a.owner)), hedef: a.wp.length && P(a.dest) ? P(a.dest).name : null }));
   K.armyPowerOf = (nid) => armies().filter((a) => a.owner === nid).reduce((s, a) => s + I().powerOf(a.units, nid), 0);
   K.armyUnitsOf = (nid) => armies().filter((a) => a.owner === nid);
 })();
@@ -6385,7 +6568,7 @@ new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
   //  Advisor ("Danışman"): rule-based recommendations every turn, plus an
   //  optional AI chat powered by Claude when the player adds an API key.
   // ======================================================================
-  const U = LOL.util, UI = LOL.ui;
+  const U = LOL.util, UI = LOL.ui, C = LOL.config;
   const A = (LOL.advisor = {});
   const SDK_URL = 'https://esm.sh/@anthropic-ai/sdk@1.4.0';
   const MODEL = 'claude-opus-5-5';
@@ -6484,9 +6667,10 @@ new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
         <div class="adv-sect">Raporum</div>
         ${tips.map((x, i) => `<div class="adv-tip${x.act ? ' click' : ''}" data-tip="${i}"><span class="adv-ico" style="background:${x.col}">${UI.icon(x.ico, 14)}</span><div>${x.text}</div></div>`).join('')}
         <div class="adv-sect">Danışmana Sor ${hasKey ? `<span class="tag ally">${provider() === 'gemini' ? 'Gemini' : 'Claude'}</span>` : ''}</div>
-        <div class="adv-chat" id="adv-chat">${chat.map((m) => `<div class="msg ${m.role}">${m.role === 'assistant' ? fmt(m.content) : U.esc(m.content)}</div>`).join('') || `<div class="hint" style="margin:0">${hasKey ? 'Strateji, diplomasi ya da savaş hakkında her şeyi sorabilirsin.' : 'Danışmanla serbestçe konuşmak için kendi Gemini ya da Claude API anahtarını bağla. Anahtar olmadan da yukarıdaki raporu her ay hazırlarım.'}</div>`}
+        <div class="adv-chat" id="adv-chat">${chat.map((m, idx) => (m.hidden ? '' : m.role !== 'assistant' ? `<div class="msg user">${U.esc(m.content)}</div>` : `<div class="msg assistant">${fmt(m.reply != null ? m.reply : m.content)}${m.actions && m.actions.length ? `<div class="adv-acts">${m.actions.map((a, k) => `<div class="adv-act${m.results ? (m.results[k].ok ? ' ok' : ' bad') : ''}">${actLabel(a)}${m.results ? `<small>${m.results[k].ok ? '✔' : '✖'} ${U.esc(m.results[k].msg)}</small>` : ''}</div>`).join('')}
+          ${m.status === 'pending' ? `<div class="adv-act-btns"><button class="primary" data-run="${idx}">✔ Onayla ve Uygula</button><button data-cancel="${idx}">Vazgeç</button></div>` : m.status === 'cancelled' ? '<small class="hint">İptal edildi.</small>' : ''}</div>` : ''}</div>`)).join('') || `<div class="hint" style="margin:0">${hasKey ? 'Soru sorabilir ya da emir verebilirsin. Örn: "Suriye\'ye savaş ilan et ve başkentteki birliklerle ordu kurup saldır" ya da "Sınır bölgelerine tahkimat kur". Emirleri uygulamadan önce onayını isterim.' : 'Danışmanla serbestçe konuşmak için kendi Gemini ya da Claude API anahtarını bağla. Anahtar olmadan da yukarıdaki raporu her ay hazırlarım.'}</div>`}
         ${busy ? '<div class="msg assistant typing"><span></span><span></span><span></span></div>' : ''}</div>
-        ${hasKey ? `<form class="adv-input"><input id="adv-q" placeholder="Örn: Kime saldırmalıyım?" autocomplete="off" ${busy ? 'disabled' : ''}><button class="primary" ${busy ? 'disabled' : ''}>Sor</button></form>
+        ${hasKey ? `<form class="adv-input"><input id="adv-q" placeholder="Soru sor ya da emir ver..."  autocomplete="off" ${busy ? 'disabled' : ''}><button class="primary" ${busy ? 'disabled' : ''}>Sor</button></form>
           <div class="adv-foot"><a href="#" data-adv="key">Yapay zekâ ayarları</a> · <a href="#" data-adv="clear">Sohbeti temizle</a></div>`
           : `<button class="primary" data-adv="key" style="width:100%;margin-top:6px">Yapay Zekâ Bağla (Gemini / Claude)</button>`}
       </div>`;
@@ -6583,7 +6767,9 @@ new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
           const r = read();
           msg.textContent = 'Deneniyor...';
           try {
-            const t = await callModel(r.prov, r.prov === 'gemini' ? r.gk : r.ck, r.model, 'Kısa yanıt ver.', [{ role: 'user', content: 'Sadece "Emrinizdeyim, efendim." de.' }], 200);
+            A.workingModel = null;
+            const t = await callModel(r.prov, r.prov === 'gemini' ? r.gk : r.ck, r.model, 'Kısa yanıt ver.', [{ role: 'user', content: 'Sadece "Emrinizdeyim, efendim." de.' }], 200,
+              { timeout: 15000, onTry: (m) => { msg.textContent = `Deneniyor: ${m}...`; } });
             const alt = r.prov === 'gemini' && A.lastModel && A.lastModel !== r.model ? ` <span style="color:#e8c050">(${U.esc(r.model)} yoğundu, yedek model <b>${U.esc(A.lastModel)}</b> kullanıldı)</span>` : '';
             msg.innerHTML = '<span style="color:var(--good)">✔ Bağlantı çalışıyor:</span> ' + U.esc(t.slice(0, 80)) + alt;
           } catch (e) { msg.innerHTML = '<span style="color:var(--bad)">✖ ' + U.esc(errText(e)) + '</span>'; }
@@ -6621,7 +6807,8 @@ new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
     }
     return clientPromise;
   }
-  async function callModel(prov, key, model, system, messages, maxTokens) {
+  async function callModel(prov, key, model, system, messages, maxTokens, opts) {
+    opts = opts || {};
     if (!key) throw { message: 'Anahtar girilmedi.' };
     if (prov === 'gemini') {
       const body = JSON.stringify({
@@ -6634,17 +6821,27 @@ new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
       }
       const transient = (st) => st === 429 || st === 500 || st === 502 || st === 503 || st === 504;
       let lastErr = null;
-      for (const m of geminiCandidates(model)) {
-        for (let attempt = 0; attempt < 2; attempt++) {
+      const cands = geminiCandidates(model);
+      if (A.workingModel && cands.includes(A.workingModel)) { cands.splice(cands.indexOf(A.workingModel), 1); cands.unshift(A.workingModel); }
+      for (const m of cands) {
+        for (let attempt = 0; attempt < 1; attempt++) {
           let r, j;
+          const ctl = new AbortController();
+          const timer = setTimeout(() => ctl.abort(), opts.timeout || 30000);
+          if (opts.onTry) opts.onTry(m);
           try {
             r = await fetch(`${GEMINI_BASE}/models/${encodeURIComponent(m)}:generateContent?key=${encodeURIComponent(key)}`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: ctl.signal,
             });
             j = await r.json().catch(() => ({}));
-          } catch (e) { lastErr = { message: 'Ağ hatası: ' + (e.message || e) }; break; }
+          } catch (e) {
+            clearTimeout(timer);
+            lastErr = e.name === 'AbortError' ? { status: 503, message: m + ' zaman aşımı' } : { message: 'Ağ hatası: ' + (e.message || e) };
+            break;
+          }
+          clearTimeout(timer);
           if (r.ok) {
-            A.lastModel = m;
+            A.lastModel = m; A.workingModel = m;
             if (j.promptFeedback && j.promptFeedback.blockReason) return 'Bu konuda size yardımcı olamam, efendim.';
             const c = j.candidates && j.candidates[0];
             const text = c && c.content && c.content.parts ? c.content.parts.map((p) => p.text || '').join('').trim() : '';
@@ -6654,8 +6851,8 @@ new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
           if (r.status === 401 || r.status === 403 || r.status === 400) throw lastErr; // key / request problem: no point retrying
           if (r.status === 404) break; // model gone: try the next one
           if (!transient(r.status)) throw lastErr;
-          if (attempt === 0 && r.status !== 429) await U.sleep(1500); // brief backoff, then retry once
-          else break; // quota on this model or still overloaded: move to the next model
+          if (A.workingModel === m) A.workingModel = null;
+          break; // overloaded / quota: move straight to the next model
         }
       }
       throw lastErr || { message: 'Bilinmeyen hata' };
@@ -6674,6 +6871,51 @@ new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
     return resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim() || '...';
   }
 
+  const ACTIONS_DOC = `Yanıtını YALNIZCA tek bir JSON nesnesi olarak ver (başka metin, markdown ya da kod bloğu yok):
+{"cevap": "oyuncuya söyleyeceğin kısa Türkçe metin", "eylemler": [ ... ]}
+"eylemler" listesine sadece oyuncu senden bir şey YAPMANI istediğinde eylem koy. Oyuncu sadece soru soruyor ya da fikir istiyorsa liste boş kalsın ([]) ve önerini "cevap" içinde anlat.
+Oyuncu "sen karar ver", "gerekeni yap" gibi şeyler derse en mantıklı eylemleri sen seç. Eylemleri oyuncu onayladıktan sonra oyun uygular; kurallara uymayan eylemler reddedilir.
+İzinli eylemler (adları oyun durumundaki adlarla BİREBİR yaz):
+{"type":"declare_war","nation":"Ülke"}
+{"type":"propose_peace","nation":"Ülke"}
+{"type":"send_gift","nation":"Ülke"}            (25 altın, ilişki +15)
+{"type":"propose_alliance","nation":"Ülke"}     (ilişki en az 40 olmalı)
+{"type":"recruit","province":"Bizim bölge","unit":"inf|mg|at|recon|tank|heavy|art|rocket","count":3}
+{"type":"build","province":"Bizim bölge","building":"fac|fort|bar"}
+{"type":"research","tech":"teknoloji id"}
+{"type":"form_army","province":"Bizim bölge","units":"all" ya da {"inf":4,"tank":2}}
+{"type":"move_army","army":"Ordu adı ya da az önce kurulan için \"yeni\"","province":"Hedef bölge"}   (düşman bölgesiyse kuşatır)
+{"type":"attack_army","army":"Ordu adı ya da \"yeni\"","target":"Düşman ordusu adı ya da ülke adı"}
+{"type":"merge_army","army":"Ordu adı"}
+Kaynakları (altın, insan gücü) aşma; maliyetler durumda var. Barışta olduğun ülkeye ordu göndermek için önce declare_war gerekir.`;
+
+  function parseReply(text) {
+    let t = String(text || '').trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+    const i0 = t.indexOf('{'), i1 = t.lastIndexOf('}');
+    if (i0 >= 0 && i1 > i0) {
+      try {
+        const j = JSON.parse(t.slice(i0, i1 + 1));
+        const acts = Array.isArray(j.eylemler) ? j.eylemler : Array.isArray(j.actions) ? j.actions : [];
+        return { reply: String(j.cevap || j.reply || '').trim() || (acts.length ? 'Emirlerinizi hazırladım, efendim.' : '...'), actions: acts.filter((x) => x && typeof x.type === 'string').slice(0, 12) };
+      } catch (e) { /* fall through */ }
+    }
+    return { reply: t, actions: [] };
+  }
+  const ACT_LABEL = {
+    declare_war: (a) => `⚔ <b>${U.esc(a.nation)}</b> ulusuna savaş ilan et`,
+    propose_peace: (a) => `🕊 <b>${U.esc(a.nation)}</b> ile barış teklif et`,
+    send_gift: (a) => `💰 <b>${U.esc(a.nation)}</b> ulusuna hediye gönder`,
+    propose_alliance: (a) => `🤝 <b>${U.esc(a.nation)}</b> ile ittifak teklif et`,
+    recruit: (a) => `🪖 <b>${U.esc(a.province)}</b>: ${a.count || 1} × ${U.esc(C.unitName[a.unit] || a.unit)} topla`,
+    build: (a) => `🏗 <b>${U.esc(a.province)}</b>: ${U.esc({ fac: 'Fabrika', fort: 'Tahkimat', bar: 'Kışla' }[a.building] || a.building)} kur`,
+    research: (a) => `🔬 Araştırma: <b>${U.esc(a.tech)}</b>`,
+    form_army: (a) => `⚑ <b>${U.esc(a.province)}</b> garnizonundan ordu kur (${a.units === 'all' || !a.units ? 'tüm birlikler' : U.esc(Object.entries(a.units).map(([k, v]) => `${v} ${C.unitShort[k] || k}`).join(', '))})`,
+    move_army: (a) => `➜ <b>${U.esc(a.army || 'yeni ordu')}</b> → ${U.esc(a.province)}`,
+    attack_army: (a) => `🎯 <b>${U.esc(a.army || 'yeni ordu')}</b>, ${U.esc(a.target)} ordusuna saldırsın`,
+    merge_army: (a) => `⤓ <b>${U.esc(a.army)}</b> garnizona katılsın`,
+  };
+  const actLabel = (a) => (ACT_LABEL[a.type] ? ACT_LABEL[a.type](a) : U.esc(a.type));
+
   async function ask(q) {
     const st = LOL.strategy.analysis();
     if (!st) return;
@@ -6681,23 +6923,49 @@ new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
     busy = true; render(st);
     try {
       const system = `Sen "Lands of Legacy" adlı büyük strateji oyununda ${st.nationName} ulusunun baş danışmanı ${st.advisorName}'sın. Tarih: ${st.date}.
-Oyuncuya "efendim" diye hitap eden, sadık, zeki ve biraz dramatik bir 1930'lar devlet adamı gibi konuş. Her zaman Türkçe yanıt ver.
-Yanıtların kısa olsun (en fazla 4-6 cümle ya da kısa bir madde listesi). Sadece verilen oyun durumuna dayan; somut bölge, ordu ve ülke adları ver.
+Oyuncuya "efendim" diye hitap eden, sadık, zeki ve biraz dramatik bir 1930'lar devlet adamı gibi konuş. Her zaman Türkçe yaz.
+"cevap" kısa olsun (en fazla 4-6 cümle). Sadece verilen oyun durumuna dayan; somut bölge, ordu ve ülke adları ver.
 Oyun kuralları: zaman sürekli akar (ay sonunda ekonomi işlenir). Bölgelerde garnizon tutulur; garnizondan "ordu" kurulur ve ordular haritada yürür, düşman bölgesine varınca kuşatma, düşman ordusuyla karşılaşınca meydan muharebesi olur.
-Birlikler: Piyade, Makineli Tüfek, Tanksavar, Zırhlı Keşif, Tank, Ağır Tank, Topçu, Roket Topçusu. Binalar: Fabrika (+gelir, +araştırma), Tahkimat (savunma), Kışla (+insan gücü). Savaşlar istikrarı düşürür.`;
+Birlikler (kod: ad): inf Piyade, mg Makineli Tüfek, at Tanksavar, recon Zırhlı Keşif, tank Tank, heavy Ağır Tank (tank2 gerekir), art Topçu, rocket Roket Topçusu (art2 gerekir). Binalar: fac Fabrika (+gelir, +araştırma), fort Tahkimat (savunma), bar Kışla (+insan gücü). Savaş ilanı istikrarı düşürür.
+
+${ACTIONS_DOC}`;
       const state = JSON.stringify(st.forLLM);
-      const messages = chat.slice(-10).map((m, i, arr) => ({
+      const messages = chat.filter((m) => !m.local).slice(-10).map((m, i, arr) => ({
         role: m.role,
-        content: i === arr.length - 1 && m.role === 'user' ? `Güncel oyun durumu (JSON):\n${state}\n\nSoru: ${m.content}` : m.content,
+        content: i === arr.length - 1 && m.role === 'user' ? `Güncel oyun durumu (JSON):\n${state}\n\nOyuncu: ${m.content}` : m.content,
       }));
-      const text = await callModel(provider(), getKey(), geminiModel(), system, messages, 4000);
-      chat.push({ role: 'assistant', content: text });
+      // merge consecutive same-role turns and make sure the conversation starts with the player
+      const merged = [];
+      for (const m of messages) {
+        if (merged.length && merged[merged.length - 1].role === m.role) merged[merged.length - 1].content += '\n\n' + m.content;
+        else merged.push({ role: m.role, content: m.content });
+      }
+      while (merged.length && merged[0].role !== 'user') merged.shift();
+      const raw = await callModel(provider(), getKey(), geminiModel(), system, merged, 4000);
+      const pr = parseReply(raw);
+      chat.push({ role: 'assistant', content: pr.reply + (pr.actions.length ? `\n[Önerilen eylemler: ${JSON.stringify(pr.actions)}]` : ''), reply: pr.reply, actions: pr.actions, status: pr.actions.length ? 'pending' : null });
       LOL.audio.play('radio');
     } catch (e) {
-      chat.push({ role: 'assistant', content: 'Telsiz bağlantısı koptu, efendim. (' + errText(e) + ')' });
+      chat.push({ role: 'assistant', local: true, content: 'Telsiz bağlantısı koptu, efendim. (' + errText(e) + ')' });
       if (e && (e.status === 401 || e.status === 403)) clientPromise = null;
     }
     busy = false;
+    render(LOL.strategy.analysis());
+  }
+
+  function execute(idx) {
+    const m = chat[idx];
+    if (!m || m.status !== 'pending') return;
+    LOL.campaign.lastFormed = null;
+    const results = m.actions.map((a) => {
+      try { return LOL.strategy.cmd.run(a); } catch (e) { return { ok: false, msg: 'Hata: ' + (e.message || e) }; }
+    });
+    m.status = 'done';
+    m.results = results;
+    LOL.strategy.cmd.after();
+    const okN = results.filter((r) => r.ok).length;
+    LOL.audio.play(okN ? 'ack' : 'click');
+    chat.push({ role: 'user', local: false, content: `[Oyun: eylemler uygulandı — ${results.map((r) => (r.ok ? '✔ ' : '✖ ') + r.msg).join(' | ')}]`, hidden: true });
     render(LOL.strategy.analysis());
   }
 
@@ -6715,6 +6983,10 @@ Birlikler: Piyade, Makineli Tüfek, Tanksavar, Zırhlı Keşif, Tank, Ağır Tan
         else if (k === 'clear') { chat = []; A.refresh(); }
         return;
       }
+      const run = e.target.closest('[data-run]');
+      if (run) { execute(+run.dataset.run); return; }
+      const cancel = e.target.closest('[data-cancel]');
+      if (cancel) { const m = chat[+cancel.dataset.cancel]; if (m) { m.status = 'cancelled'; chat.push({ role: 'user', content: '[Oyuncu önerilen eylemleri iptal etti]', hidden: true }); } A.refresh(); return; }
       const tip = e.target.closest('[data-tip]');
       if (tip) {
         const t = tips[+tip.dataset.tip];

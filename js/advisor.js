@@ -4,7 +4,7 @@
   //  Advisor ("Danışman"): rule-based recommendations every turn, plus an
   //  optional AI chat powered by Claude when the player adds an API key.
   // ======================================================================
-  const U = LOL.util, UI = LOL.ui;
+  const U = LOL.util, UI = LOL.ui, C = LOL.config;
   const A = (LOL.advisor = {});
   const SDK_URL = 'https://esm.sh/@anthropic-ai/sdk@1.4.0';
   const MODEL = 'claude-opus-5-5';
@@ -103,9 +103,10 @@
         <div class="adv-sect">Raporum</div>
         ${tips.map((x, i) => `<div class="adv-tip${x.act ? ' click' : ''}" data-tip="${i}"><span class="adv-ico" style="background:${x.col}">${UI.icon(x.ico, 14)}</span><div>${x.text}</div></div>`).join('')}
         <div class="adv-sect">Danışmana Sor ${hasKey ? `<span class="tag ally">${provider() === 'gemini' ? 'Gemini' : 'Claude'}</span>` : ''}</div>
-        <div class="adv-chat" id="adv-chat">${chat.map((m) => `<div class="msg ${m.role}">${m.role === 'assistant' ? fmt(m.content) : U.esc(m.content)}</div>`).join('') || `<div class="hint" style="margin:0">${hasKey ? 'Strateji, diplomasi ya da savaş hakkında her şeyi sorabilirsin.' : 'Danışmanla serbestçe konuşmak için kendi Gemini ya da Claude API anahtarını bağla. Anahtar olmadan da yukarıdaki raporu her ay hazırlarım.'}</div>`}
+        <div class="adv-chat" id="adv-chat">${chat.map((m, idx) => (m.hidden ? '' : m.role !== 'assistant' ? `<div class="msg user">${U.esc(m.content)}</div>` : `<div class="msg assistant">${fmt(m.reply != null ? m.reply : m.content)}${m.actions && m.actions.length ? `<div class="adv-acts">${m.actions.map((a, k) => `<div class="adv-act${m.results ? (m.results[k].ok ? ' ok' : ' bad') : ''}">${actLabel(a)}${m.results ? `<small>${m.results[k].ok ? '✔' : '✖'} ${U.esc(m.results[k].msg)}</small>` : ''}</div>`).join('')}
+          ${m.status === 'pending' ? `<div class="adv-act-btns"><button class="primary" data-run="${idx}">✔ Onayla ve Uygula</button><button data-cancel="${idx}">Vazgeç</button></div>` : m.status === 'cancelled' ? '<small class="hint">İptal edildi.</small>' : ''}</div>` : ''}</div>`)).join('') || `<div class="hint" style="margin:0">${hasKey ? 'Soru sorabilir ya da emir verebilirsin. Örn: "Suriye\'ye savaş ilan et ve başkentteki birliklerle ordu kurup saldır" ya da "Sınır bölgelerine tahkimat kur". Emirleri uygulamadan önce onayını isterim.' : 'Danışmanla serbestçe konuşmak için kendi Gemini ya da Claude API anahtarını bağla. Anahtar olmadan da yukarıdaki raporu her ay hazırlarım.'}</div>`}
         ${busy ? '<div class="msg assistant typing"><span></span><span></span><span></span></div>' : ''}</div>
-        ${hasKey ? `<form class="adv-input"><input id="adv-q" placeholder="Örn: Kime saldırmalıyım?" autocomplete="off" ${busy ? 'disabled' : ''}><button class="primary" ${busy ? 'disabled' : ''}>Sor</button></form>
+        ${hasKey ? `<form class="adv-input"><input id="adv-q" placeholder="Soru sor ya da emir ver..."  autocomplete="off" ${busy ? 'disabled' : ''}><button class="primary" ${busy ? 'disabled' : ''}>Sor</button></form>
           <div class="adv-foot"><a href="#" data-adv="key">Yapay zekâ ayarları</a> · <a href="#" data-adv="clear">Sohbeti temizle</a></div>`
           : `<button class="primary" data-adv="key" style="width:100%;margin-top:6px">Yapay Zekâ Bağla (Gemini / Claude)</button>`}
       </div>`;
@@ -202,7 +203,9 @@
           const r = read();
           msg.textContent = 'Deneniyor...';
           try {
-            const t = await callModel(r.prov, r.prov === 'gemini' ? r.gk : r.ck, r.model, 'Kısa yanıt ver.', [{ role: 'user', content: 'Sadece "Emrinizdeyim, efendim." de.' }], 200);
+            A.workingModel = null;
+            const t = await callModel(r.prov, r.prov === 'gemini' ? r.gk : r.ck, r.model, 'Kısa yanıt ver.', [{ role: 'user', content: 'Sadece "Emrinizdeyim, efendim." de.' }], 200,
+              { timeout: 15000, onTry: (m) => { msg.textContent = `Deneniyor: ${m}...`; } });
             const alt = r.prov === 'gemini' && A.lastModel && A.lastModel !== r.model ? ` <span style="color:#e8c050">(${U.esc(r.model)} yoğundu, yedek model <b>${U.esc(A.lastModel)}</b> kullanıldı)</span>` : '';
             msg.innerHTML = '<span style="color:var(--good)">✔ Bağlantı çalışıyor:</span> ' + U.esc(t.slice(0, 80)) + alt;
           } catch (e) { msg.innerHTML = '<span style="color:var(--bad)">✖ ' + U.esc(errText(e)) + '</span>'; }
@@ -240,7 +243,8 @@
     }
     return clientPromise;
   }
-  async function callModel(prov, key, model, system, messages, maxTokens) {
+  async function callModel(prov, key, model, system, messages, maxTokens, opts) {
+    opts = opts || {};
     if (!key) throw { message: 'Anahtar girilmedi.' };
     if (prov === 'gemini') {
       const body = JSON.stringify({
@@ -253,17 +257,27 @@
       }
       const transient = (st) => st === 429 || st === 500 || st === 502 || st === 503 || st === 504;
       let lastErr = null;
-      for (const m of geminiCandidates(model)) {
-        for (let attempt = 0; attempt < 2; attempt++) {
+      const cands = geminiCandidates(model);
+      if (A.workingModel && cands.includes(A.workingModel)) { cands.splice(cands.indexOf(A.workingModel), 1); cands.unshift(A.workingModel); }
+      for (const m of cands) {
+        for (let attempt = 0; attempt < 1; attempt++) {
           let r, j;
+          const ctl = new AbortController();
+          const timer = setTimeout(() => ctl.abort(), opts.timeout || 30000);
+          if (opts.onTry) opts.onTry(m);
           try {
             r = await fetch(`${GEMINI_BASE}/models/${encodeURIComponent(m)}:generateContent?key=${encodeURIComponent(key)}`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: ctl.signal,
             });
             j = await r.json().catch(() => ({}));
-          } catch (e) { lastErr = { message: 'Ağ hatası: ' + (e.message || e) }; break; }
+          } catch (e) {
+            clearTimeout(timer);
+            lastErr = e.name === 'AbortError' ? { status: 503, message: m + ' zaman aşımı' } : { message: 'Ağ hatası: ' + (e.message || e) };
+            break;
+          }
+          clearTimeout(timer);
           if (r.ok) {
-            A.lastModel = m;
+            A.lastModel = m; A.workingModel = m;
             if (j.promptFeedback && j.promptFeedback.blockReason) return 'Bu konuda size yardımcı olamam, efendim.';
             const c = j.candidates && j.candidates[0];
             const text = c && c.content && c.content.parts ? c.content.parts.map((p) => p.text || '').join('').trim() : '';
@@ -273,8 +287,8 @@
           if (r.status === 401 || r.status === 403 || r.status === 400) throw lastErr; // key / request problem: no point retrying
           if (r.status === 404) break; // model gone: try the next one
           if (!transient(r.status)) throw lastErr;
-          if (attempt === 0 && r.status !== 429) await U.sleep(1500); // brief backoff, then retry once
-          else break; // quota on this model or still overloaded: move to the next model
+          if (A.workingModel === m) A.workingModel = null;
+          break; // overloaded / quota: move straight to the next model
         }
       }
       throw lastErr || { message: 'Bilinmeyen hata' };
@@ -293,6 +307,51 @@
     return resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim() || '...';
   }
 
+  const ACTIONS_DOC = `Yanıtını YALNIZCA tek bir JSON nesnesi olarak ver (başka metin, markdown ya da kod bloğu yok):
+{"cevap": "oyuncuya söyleyeceğin kısa Türkçe metin", "eylemler": [ ... ]}
+"eylemler" listesine sadece oyuncu senden bir şey YAPMANI istediğinde eylem koy. Oyuncu sadece soru soruyor ya da fikir istiyorsa liste boş kalsın ([]) ve önerini "cevap" içinde anlat.
+Oyuncu "sen karar ver", "gerekeni yap" gibi şeyler derse en mantıklı eylemleri sen seç. Eylemleri oyuncu onayladıktan sonra oyun uygular; kurallara uymayan eylemler reddedilir.
+İzinli eylemler (adları oyun durumundaki adlarla BİREBİR yaz):
+{"type":"declare_war","nation":"Ülke"}
+{"type":"propose_peace","nation":"Ülke"}
+{"type":"send_gift","nation":"Ülke"}            (25 altın, ilişki +15)
+{"type":"propose_alliance","nation":"Ülke"}     (ilişki en az 40 olmalı)
+{"type":"recruit","province":"Bizim bölge","unit":"inf|mg|at|recon|tank|heavy|art|rocket","count":3}
+{"type":"build","province":"Bizim bölge","building":"fac|fort|bar"}
+{"type":"research","tech":"teknoloji id"}
+{"type":"form_army","province":"Bizim bölge","units":"all" ya da {"inf":4,"tank":2}}
+{"type":"move_army","army":"Ordu adı ya da az önce kurulan için \"yeni\"","province":"Hedef bölge"}   (düşman bölgesiyse kuşatır)
+{"type":"attack_army","army":"Ordu adı ya da \"yeni\"","target":"Düşman ordusu adı ya da ülke adı"}
+{"type":"merge_army","army":"Ordu adı"}
+Kaynakları (altın, insan gücü) aşma; maliyetler durumda var. Barışta olduğun ülkeye ordu göndermek için önce declare_war gerekir.`;
+
+  function parseReply(text) {
+    let t = String(text || '').trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+    const i0 = t.indexOf('{'), i1 = t.lastIndexOf('}');
+    if (i0 >= 0 && i1 > i0) {
+      try {
+        const j = JSON.parse(t.slice(i0, i1 + 1));
+        const acts = Array.isArray(j.eylemler) ? j.eylemler : Array.isArray(j.actions) ? j.actions : [];
+        return { reply: String(j.cevap || j.reply || '').trim() || (acts.length ? 'Emirlerinizi hazırladım, efendim.' : '...'), actions: acts.filter((x) => x && typeof x.type === 'string').slice(0, 12) };
+      } catch (e) { /* fall through */ }
+    }
+    return { reply: t, actions: [] };
+  }
+  const ACT_LABEL = {
+    declare_war: (a) => `⚔ <b>${U.esc(a.nation)}</b> ulusuna savaş ilan et`,
+    propose_peace: (a) => `🕊 <b>${U.esc(a.nation)}</b> ile barış teklif et`,
+    send_gift: (a) => `💰 <b>${U.esc(a.nation)}</b> ulusuna hediye gönder`,
+    propose_alliance: (a) => `🤝 <b>${U.esc(a.nation)}</b> ile ittifak teklif et`,
+    recruit: (a) => `🪖 <b>${U.esc(a.province)}</b>: ${a.count || 1} × ${U.esc(C.unitName[a.unit] || a.unit)} topla`,
+    build: (a) => `🏗 <b>${U.esc(a.province)}</b>: ${U.esc({ fac: 'Fabrika', fort: 'Tahkimat', bar: 'Kışla' }[a.building] || a.building)} kur`,
+    research: (a) => `🔬 Araştırma: <b>${U.esc(a.tech)}</b>`,
+    form_army: (a) => `⚑ <b>${U.esc(a.province)}</b> garnizonundan ordu kur (${a.units === 'all' || !a.units ? 'tüm birlikler' : U.esc(Object.entries(a.units).map(([k, v]) => `${v} ${C.unitShort[k] || k}`).join(', '))})`,
+    move_army: (a) => `➜ <b>${U.esc(a.army || 'yeni ordu')}</b> → ${U.esc(a.province)}`,
+    attack_army: (a) => `🎯 <b>${U.esc(a.army || 'yeni ordu')}</b>, ${U.esc(a.target)} ordusuna saldırsın`,
+    merge_army: (a) => `⤓ <b>${U.esc(a.army)}</b> garnizona katılsın`,
+  };
+  const actLabel = (a) => (ACT_LABEL[a.type] ? ACT_LABEL[a.type](a) : U.esc(a.type));
+
   async function ask(q) {
     const st = LOL.strategy.analysis();
     if (!st) return;
@@ -300,23 +359,49 @@
     busy = true; render(st);
     try {
       const system = `Sen "Lands of Legacy" adlı büyük strateji oyununda ${st.nationName} ulusunun baş danışmanı ${st.advisorName}'sın. Tarih: ${st.date}.
-Oyuncuya "efendim" diye hitap eden, sadık, zeki ve biraz dramatik bir 1930'lar devlet adamı gibi konuş. Her zaman Türkçe yanıt ver.
-Yanıtların kısa olsun (en fazla 4-6 cümle ya da kısa bir madde listesi). Sadece verilen oyun durumuna dayan; somut bölge, ordu ve ülke adları ver.
+Oyuncuya "efendim" diye hitap eden, sadık, zeki ve biraz dramatik bir 1930'lar devlet adamı gibi konuş. Her zaman Türkçe yaz.
+"cevap" kısa olsun (en fazla 4-6 cümle). Sadece verilen oyun durumuna dayan; somut bölge, ordu ve ülke adları ver.
 Oyun kuralları: zaman sürekli akar (ay sonunda ekonomi işlenir). Bölgelerde garnizon tutulur; garnizondan "ordu" kurulur ve ordular haritada yürür, düşman bölgesine varınca kuşatma, düşman ordusuyla karşılaşınca meydan muharebesi olur.
-Birlikler: Piyade, Makineli Tüfek, Tanksavar, Zırhlı Keşif, Tank, Ağır Tank, Topçu, Roket Topçusu. Binalar: Fabrika (+gelir, +araştırma), Tahkimat (savunma), Kışla (+insan gücü). Savaşlar istikrarı düşürür.`;
+Birlikler (kod: ad): inf Piyade, mg Makineli Tüfek, at Tanksavar, recon Zırhlı Keşif, tank Tank, heavy Ağır Tank (tank2 gerekir), art Topçu, rocket Roket Topçusu (art2 gerekir). Binalar: fac Fabrika (+gelir, +araştırma), fort Tahkimat (savunma), bar Kışla (+insan gücü). Savaş ilanı istikrarı düşürür.
+
+${ACTIONS_DOC}`;
       const state = JSON.stringify(st.forLLM);
-      const messages = chat.slice(-10).map((m, i, arr) => ({
+      const messages = chat.filter((m) => !m.local).slice(-10).map((m, i, arr) => ({
         role: m.role,
-        content: i === arr.length - 1 && m.role === 'user' ? `Güncel oyun durumu (JSON):\n${state}\n\nSoru: ${m.content}` : m.content,
+        content: i === arr.length - 1 && m.role === 'user' ? `Güncel oyun durumu (JSON):\n${state}\n\nOyuncu: ${m.content}` : m.content,
       }));
-      const text = await callModel(provider(), getKey(), geminiModel(), system, messages, 4000);
-      chat.push({ role: 'assistant', content: text });
+      // merge consecutive same-role turns and make sure the conversation starts with the player
+      const merged = [];
+      for (const m of messages) {
+        if (merged.length && merged[merged.length - 1].role === m.role) merged[merged.length - 1].content += '\n\n' + m.content;
+        else merged.push({ role: m.role, content: m.content });
+      }
+      while (merged.length && merged[0].role !== 'user') merged.shift();
+      const raw = await callModel(provider(), getKey(), geminiModel(), system, merged, 4000);
+      const pr = parseReply(raw);
+      chat.push({ role: 'assistant', content: pr.reply + (pr.actions.length ? `\n[Önerilen eylemler: ${JSON.stringify(pr.actions)}]` : ''), reply: pr.reply, actions: pr.actions, status: pr.actions.length ? 'pending' : null });
       LOL.audio.play('radio');
     } catch (e) {
-      chat.push({ role: 'assistant', content: 'Telsiz bağlantısı koptu, efendim. (' + errText(e) + ')' });
+      chat.push({ role: 'assistant', local: true, content: 'Telsiz bağlantısı koptu, efendim. (' + errText(e) + ')' });
       if (e && (e.status === 401 || e.status === 403)) clientPromise = null;
     }
     busy = false;
+    render(LOL.strategy.analysis());
+  }
+
+  function execute(idx) {
+    const m = chat[idx];
+    if (!m || m.status !== 'pending') return;
+    LOL.campaign.lastFormed = null;
+    const results = m.actions.map((a) => {
+      try { return LOL.strategy.cmd.run(a); } catch (e) { return { ok: false, msg: 'Hata: ' + (e.message || e) }; }
+    });
+    m.status = 'done';
+    m.results = results;
+    LOL.strategy.cmd.after();
+    const okN = results.filter((r) => r.ok).length;
+    LOL.audio.play(okN ? 'ack' : 'click');
+    chat.push({ role: 'user', local: false, content: `[Oyun: eylemler uygulandı — ${results.map((r) => (r.ok ? '✔ ' : '✖ ') + r.msg).join(' | ')}]`, hidden: true });
     render(LOL.strategy.analysis());
   }
 
@@ -334,6 +419,10 @@ Birlikler: Piyade, Makineli Tüfek, Tanksavar, Zırhlı Keşif, Tank, Ağır Tan
         else if (k === 'clear') { chat = []; A.refresh(); }
         return;
       }
+      const run = e.target.closest('[data-run]');
+      if (run) { execute(+run.dataset.run); return; }
+      const cancel = e.target.closest('[data-cancel]');
+      if (cancel) { const m = chat[+cancel.dataset.cancel]; if (m) { m.status = 'cancelled'; chat.push({ role: 'user', content: '[Oyuncu önerilen eylemleri iptal etti]', hidden: true }); } A.refresh(); return; }
       const tip = e.target.closest('[data-tip]');
       if (tip) {
         const t = tips[+tip.dataset.tip];

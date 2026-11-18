@@ -137,6 +137,7 @@
     };
     g.armies.push(a);
     if (I().isPlayer(owner)) {
+      K.lastFormed = a.id;
       selId = a.id;
       UI.toast(`<b>${a.name}</b> kuruldu. Haritada gitmesini istediğin yere sağ tıkla.`, 'good');
       LOL.audio.say('select', domClass(a.units));
@@ -549,6 +550,43 @@
     list.sort((u, v) => u.p[1] - v.p[1]);
     for (const o of list) token(ctx, o.a, o.p[0], o.p[1], s, o.a.id === selId);
   };
+  // advisor commands on armies
+  K.cmd = function (c, h) {
+    const i = I(), me = i.G().playerId;
+    const mineA = armies().filter((a) => a.owner === me);
+    const wantNew = !c.army || /^(yeni|new|son|last|\$last)$/i.test(String(c.army).trim());
+    const a = (wantNew && byId(K.lastFormed)) || h.findBy(mineA, c.army, (x) => x.name) || (mineA.length === 1 ? mineA[0] : null);
+    if (!a) return { ok: false, msg: `Ordu bulunamadı: ${c.army || '(belirtilmedi)'}` };
+    if (a.busy) return { ok: false, msg: `${a.name} şu an çarpışıyor.` };
+    if (c.type === 'merge_army') {
+      const p = P(a.prov);
+      if (!p || p.owner !== me) return { ok: false, msg: `${a.name} kendi bölgemizde değil.` };
+      mergeInto(a, p);
+      return { ok: true, msg: `${a.name}, ${p.name} garnizonuna katıldı.` };
+    }
+    if (c.type === 'attack_army') {
+      const foes = armies().filter((b) => b.owner !== me && hostile(me, b.owner));
+      let t = h.findBy(foes, c.target, (x) => x.name);
+      if (!t) {
+        const n = h.findNation(c.target);
+        if (n) t = foes.filter((b) => b.owner === n.id).sort((x, y) => Math.hypot(x.x - a.x, x.y - a.y) - Math.hypot(y.x - a.x, y.y - a.y))[0];
+      }
+      if (!t) return { ok: false, msg: `Savaşta olduğumuz düşman ordusu bulunamadı: ${c.target}` };
+      a.chase = t.id; a.mergeHome = false; chaseUpdate(a);
+      if (!a.wp.length) return { ok: false, msg: `${a.name} ${t.name} ordusuna ulaşamıyor.` };
+      if (!speed) K.setSpeed(1);
+      return { ok: true, msg: `${a.name}, ${t.name} ordusunun peşine düştü.` };
+    }
+    const p = h.findProv(c.province, false);
+    if (!p) return { ok: false, msg: `Bölge bulunamadı: ${c.province}` };
+    if (!friendly(me, p.owner) && !hostile(me, p.owner)) return { ok: false, msg: `${p.name} (${i.nation(p.owner).name}) ile savaşta değiliz — önce savaş ilan edilmeli.` };
+    a.chase = null;
+    if (!orderTo(a, p.id)) return { ok: false, msg: `${a.name} için ${p.name} bölgesine yol yok.` };
+    const days = Math.ceil(a.wp.reduce((s2, w, k) => s2 + Math.hypot(w.x - (k ? a.wp[k - 1].x : a.x), w.y - (k ? a.wp[k - 1].y : a.y)), 0) / speedPx(a));
+    if (!speed) K.setSpeed(1);
+    return { ok: true, msg: `${a.name} → ${p.name} (${hostile(me, p.owner) ? 'kuşatma, ' : ''}~${days} gün).` };
+  };
+  K.armyList = () => armies().map((a) => ({ ad: a.name, sahibi: I().nation(a.owner).name, konum: P(a.prov) ? P(a.prov).name : 'deniz', birlikler: Object.fromEntries(U.TYPES.filter((t) => a.units[t]).map((t) => [C.unitName[t], a.units[t]])), guc: Math.round(I().powerOf(a.units, a.owner)), hedef: a.wp.length && P(a.dest) ? P(a.dest).name : null }));
   K.armyPowerOf = (nid) => armies().filter((a) => a.owner === nid).reduce((s, a) => s + I().powerOf(a.units, nid), 0);
   K.armyUnitsOf = (nid) => armies().filter((a) => a.owner === nid);
 })();

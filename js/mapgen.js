@@ -558,6 +558,7 @@
     const pixByC = countries.map(() => []);
     for (let i = 0; i < N; i++) if (cid[i] >= 0) pixByC[cid[i]].push(i);
     let seeds = []; // {x,y,c}
+    const mainCompOf = new Int32Array(countries.length).fill(-1);
     countries.forEach((c, ci) => {
       if (!keep[ci]) return;
       const pix = pixByC[ci];
@@ -577,6 +578,17 @@
         if (local.every((s) => (s.x - x) ** 2 + (s.y - y) ** 2 >= minD * minD)) local.push({ x, y, c: ci });
       }
       if (!local.length) { const i = pix[area >> 1]; local.push({ x: i % W, y: (i / W) | 0, c: ci }); }
+      // every separate landmass of the country (overseas territory, big island) gets its own province
+      const byComp = new Map();
+      mainCompOf[ci] = -1;
+      for (const i of pix) { const cc = comp[i]; let e = byComp.get(cc); if (!e) { e = { n: 0, i }; byComp.set(cc, e); } e.n++; if (e.n === Math.ceil(e.n / 2) * 2 && (e.n & 63) === 0) e.i = i; }
+      local.forEach((s2) => { s2.comp = comp[s2.y * W + s2.x]; });
+      let bigN = 0;
+      for (const [cc, e] of byComp) if (e.n > bigN) { bigN = e.n; mainCompOf[ci] = cc; }
+      for (const [cc, e] of byComp) {
+        if (e.n < 25 || local.some((s2) => s2.comp === cc)) continue;
+        local.push({ x: e.i % W, y: (e.i / W) | 0, c: ci, comp: cc });
+      }
       local.forEach((s) => seeds.push(s));
     });
     let seedsByC = countries.map(() => []);
@@ -585,7 +597,8 @@
     for (let i = 0; i < N; i++) {
       const ci = cid[i];
       if (ci < 0) continue;
-      const list = seedsByC[ci];
+      let list = seedsByC[ci];
+      if (list.length > 1) { const same = list.filter((k) => seeds[k].comp === comp[i]); if (same.length) list = same; }
       if (list.length === 1) { pid[i] = list[0]; continue; }
       const x = i % W, y = (i / W) | 0;
       const jx = x + (nzA.fbm(x / 25, y / 25, 3) - 0.5) * 40, jy = y + (nzB.fbm(x / 25, y / 25, 3) - 0.5) * 40;
@@ -607,7 +620,16 @@
     // province names: country + direction
     const names = seeds.map((s) => {
       const nat = nations[natOf[s.c]];
-      const list = seedsByC[s.c];
+      let list = seedsByC[s.c];
+      if (list.length === 1) return nat.name;
+      if (s.comp !== mainCompOf[s.c]) {
+        // overseas territory / island: name it relative to the homeland
+        const home = list.map((k) => seeds[k]).filter((q) => q.comp === mainCompOf[s.c]);
+        const hx = home.length ? home.reduce((t, q) => t + q.x, 0) / home.length : s.x;
+        const hy = home.length ? home.reduce((t, q) => t + q.y, 0) / home.length : s.y;
+        return Math.hypot(s.x - hx, s.y - hy) > 160 ? 'Denizaşırı ' + nat.name : nat.name + ' Adası';
+      }
+      list = list.filter((k) => seeds[k].comp === mainCompOf[s.c]);
       if (list.length === 1) return nat.name;
       let cx = 0, cy = 0;
       list.forEach((k) => { cx += seeds[k].x; cy += seeds[k].y; });
